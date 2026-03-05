@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import draggable from 'vuedraggable'
 import type { BoardConfig, ImageItem, QualityHint, TierConfig } from '../lib/board'
@@ -36,6 +36,7 @@ const isResolvingInput = ref(false)
 const isSearchDropActive = ref(false)
 const message = ref<string>('')
 const failedImages = ref<Record<string, boolean>>({})
+const previewImageSrc = ref<string>('')
 
 const tierCount = computed(() => config.value.tiers.length)
 const imageCount = computed(() => config.value.images.length)
@@ -523,6 +524,31 @@ function isImageFailed(image: ImageItem): boolean {
   return image.resolveStatus === 'failed' || !!failedImages.value[image.id]
 }
 
+function openImagePreview(image: ImageItem): void {
+  if (isImageFailed(image)) {
+    return
+  }
+  previewImageSrc.value = image.src
+}
+
+function closeImagePreview(): void {
+  previewImageSrc.value = ''
+}
+
+function onWindowKeyDown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && previewImageSrc.value) {
+    closeImagePreview()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onWindowKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onWindowKeyDown)
+})
+
 function startBoard(): void {
   const normalizedTiers = config.value.tiers.map((tier, index) => ({
     ...tier,
@@ -642,7 +668,18 @@ function startBoard(): void {
 
       <div v-if="config.images.length > 0" class="image-grid">
         <div v-for="image in config.images" :key="image.id" class="image-card">
-          <img v-if="!isImageFailed(image)" :src="image.src" alt="preview" @error="markImageFailed(image)" />
+          <img
+            v-if="!isImageFailed(image)"
+            :src="image.src"
+            alt="preview"
+            class="previewable-image"
+            role="button"
+            tabindex="0"
+            @error="markImageFailed(image)"
+            @click="openImagePreview(image)"
+            @keydown.enter.prevent="openImagePreview(image)"
+            @keydown.space.prevent="openImagePreview(image)"
+          />
           <div v-else class="image-fallback">
             <span>图片不可用</span>
             <span>{{ image.resolveReason ?? '请更换为可访问的图片地址。' }}</span>
@@ -662,6 +699,13 @@ function startBoard(): void {
     <footer class="setup-footer">
       <button type="button" class="primary-btn start-btn" @click="startBoard">进入榜单</button>
     </footer>
+
+    <div v-if="previewImageSrc" class="image-preview-mask" @click="closeImagePreview">
+      <div class="image-preview-dialog" @click.stop>
+        <button type="button" class="image-preview-close" aria-label="关闭预览" @click="closeImagePreview">关闭</button>
+        <img class="image-preview-full" :src="previewImageSrc" alt="full preview" />
+      </div>
+    </div>
   </section>
 </template>
 
@@ -870,6 +914,10 @@ function startBoard(): void {
   display: block;
 }
 
+.previewable-image {
+  cursor: zoom-in;
+}
+
 .image-meta {
   display: flex;
   justify-content: space-between;
@@ -927,6 +975,44 @@ function startBoard(): void {
   margin-top: 14px;
   color: #b91c1c;
   font-size: 14px;
+}
+
+.image-preview-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  padding: 20px;
+}
+
+.image-preview-dialog {
+  position: relative;
+  max-width: min(92vw, 1400px);
+  max-height: 90vh;
+  background: #111827;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.image-preview-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+}
+
+.image-preview-full {
+  display: block;
+  max-width: min(90vw, 1360px);
+  max-height: calc(90vh - 24px);
+  object-fit: contain;
 }
 
 .setup-footer {

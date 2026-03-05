@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { onUnmounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import draggable from 'vuedraggable'
 import type { BoardConfig, BoardState, ImageItem } from '../lib/board'
@@ -28,6 +28,7 @@ const failedImages = ref<Record<string, boolean>>({})
 const rankTableRef = ref<HTMLElement | null>(null)
 const isDownloading = ref(false)
 const downloadStatus = ref<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null)
+const previewImageSrc = ref<string>('')
 let downloadStatusTimer: ReturnType<typeof setTimeout> | null = null
 
 function markImageFailed(item: ImageItem): void {
@@ -60,6 +61,24 @@ function isImageFailed(item: ImageItem): boolean {
 function imageFailReason(item: ImageItem): string {
   return item.resolveReason ?? '链接无效或被防盗链拦截。'
 }
+
+function openImagePreview(item: ImageItem): void {
+  if (isImageFailed(item)) {
+    return
+  }
+  previewImageSrc.value = item.src
+}
+
+function closeImagePreview(): void {
+  previewImageSrc.value = ''
+}
+
+function onWindowKeyDown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && previewImageSrc.value) {
+    closeImagePreview()
+  }
+}
+
 function clearDownloadStatus(): void {
   if (downloadStatusTimer !== null) {
     clearTimeout(downloadStatusTimer)
@@ -112,6 +131,46 @@ async function waitForImagesReady(container: HTMLElement): Promise<void> {
   )
 }
 
+async function downloadRankTableWithHtml2Canvas(rankTable: HTMLElement): Promise<void> {
+  const { default: html2canvas } = await import('html2canvas')
+  const canvas = await html2canvas(rankTable, {
+    backgroundColor: '#ffffff',
+    scale: Math.max(window.devicePixelRatio || 1, EXPORT_SCALE),
+    width: rankTable.scrollWidth,
+    height: rankTable.scrollHeight,
+    useCORS: true,
+    allowTaint: false,
+    imageTimeout: 15000,
+    logging: false,
+    onclone: (clonedDocument) => {
+      const clonedImages = clonedDocument.querySelectorAll('.image-block img')
+      clonedImages.forEach((node) => {
+        const image = node as HTMLImageElement
+        const src = image.getAttribute('src')
+        if (!src) {
+          return
+        }
+
+        const replacement = clonedDocument.createElement('div')
+        const safeSrc = src.replace(/["\\]/g, '\\$&')
+        replacement.style.width = '100%'
+        replacement.style.height = '100%'
+        replacement.style.display = 'block'
+        replacement.style.backgroundImage = `url("${safeSrc}")`
+        replacement.style.backgroundSize = 'cover'
+        replacement.style.backgroundPosition = 'center center'
+        replacement.style.backgroundRepeat = 'no-repeat'
+        image.replaceWith(replacement)
+      })
+    },
+  })
+
+  const downloadLink = document.createElement('a')
+  downloadLink.href = canvas.toDataURL('image/png')
+  downloadLink.download = getDownloadFilename()
+  downloadLink.click()
+}
+
 // 仅导出 rank-table 区域为 PNG。
 async function downloadRankTable(): Promise<void> {
   if (isDownloading.value) {
@@ -128,43 +187,7 @@ async function downloadRankTable(): Promise<void> {
 
   try {
     await waitForImagesReady(rankTable)
-    const { default: html2canvas } = await import('html2canvas')
-    const canvas = await html2canvas(rankTable, {
-      backgroundColor: '#ffffff',
-      scale: Math.max(window.devicePixelRatio || 1, EXPORT_SCALE),
-      width: rankTable.scrollWidth,
-      height: rankTable.scrollHeight,
-      useCORS: true,
-      allowTaint: false,
-      imageTimeout: 15000,
-      logging: false,
-      onclone: (clonedDocument) => {
-        const clonedImages = clonedDocument.querySelectorAll('.image-block img')
-        clonedImages.forEach((node) => {
-          const image = node as HTMLImageElement
-          const src = image.getAttribute('src')
-          if (!src) {
-            return
-          }
-
-          const replacement = clonedDocument.createElement('div')
-          const safeSrc = src.replace(/["\\]/g, '\\$&')
-          replacement.style.width = '100%'
-          replacement.style.height = '100%'
-          replacement.style.display = 'block'
-          replacement.style.backgroundImage = `url("${safeSrc}")`
-          replacement.style.backgroundSize = 'cover'
-          replacement.style.backgroundPosition = 'center center'
-          replacement.style.backgroundRepeat = 'no-repeat'
-          image.replaceWith(replacement)
-        })
-      },
-    })
-
-    const downloadLink = document.createElement('a')
-    downloadLink.href = canvas.toDataURL('image/png')
-    downloadLink.download = getDownloadFilename()
-    downloadLink.click()
+    await downloadRankTableWithHtml2Canvas(rankTable)
 
     if (Object.keys(failedImages.value).length > 0) {
       showDownloadStatus('warning', 'Downloaded. Some images may be missing.')
@@ -179,7 +202,12 @@ async function downloadRankTable(): Promise<void> {
   }
 }
 
+onMounted(() => {
+  window.addEventListener('keydown', onWindowKeyDown)
+})
+
 onUnmounted(() => {
+  window.removeEventListener('keydown', onWindowKeyDown)
   clearDownloadStatus()
 })
 </script>
@@ -207,7 +235,18 @@ onUnmounted(() => {
           >
             <template #item="{ element }">
               <div class="image-block">
-                <img v-if="!isImageFailed(element)" :src="element.src" alt="rank item" @error="markImageFailed(element)" />
+                <img
+                  v-if="!isImageFailed(element)"
+                  :src="element.src"
+                  alt="rank item"
+                  class="previewable-image"
+                  role="button"
+                  tabindex="0"
+                  @error="markImageFailed(element)"
+                  @click.stop="openImagePreview(element)"
+                  @keydown.enter.prevent="openImagePreview(element)"
+                  @keydown.space.prevent="openImagePreview(element)"
+                />
                 <div v-else class="image-fallback">
                   <span>{{ imageFailReason(element) }}</span>
                   <span>请返回配置页更换链接</span>
@@ -235,7 +274,18 @@ onUnmounted(() => {
       >
         <template #item="{ element }">
           <div class="image-block">
-            <img v-if="!isImageFailed(element)" :src="element.src" alt="pool item" @error="markImageFailed(element)" />
+            <img
+              v-if="!isImageFailed(element)"
+              :src="element.src"
+              alt="pool item"
+              class="previewable-image"
+              role="button"
+              tabindex="0"
+              @error="markImageFailed(element)"
+              @click.stop="openImagePreview(element)"
+              @keydown.enter.prevent="openImagePreview(element)"
+              @keydown.space.prevent="openImagePreview(element)"
+            />
             <div v-else class="image-fallback">
               <span>{{ imageFailReason(element) }}</span>
               <span>请返回配置页更换链接</span>
@@ -254,6 +304,12 @@ onUnmounted(() => {
         {{ isDownloading ? 'Downloading...' : 'Download PNG' }}
       </button>
       <button type="button" class="floating-button floating-edit" @click="goSetup">编辑配置</button>
+    </div>
+
+    <div v-if="previewImageSrc" class="image-preview-mask" @click="closeImagePreview">
+      <div class="image-preview-dialog" @click.stop>
+        <img class="image-preview-full" :src="previewImageSrc" alt="full preview" />
+      </div>
     </div>
   </section>
 </template>
@@ -375,6 +431,10 @@ onUnmounted(() => {
   display: block;
 }
 
+.previewable-image {
+  cursor: zoom-in;
+}
+
 .image-fallback {
   width: 100%;
   height: 100%;
@@ -464,6 +524,44 @@ onUnmounted(() => {
   border-color: #991b1b;
   background: #fef2f2;
   color: #991b1b;
+}
+
+.image-preview-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  padding: 20px;
+}
+
+.image-preview-dialog {
+  position: relative;
+  max-width: min(92vw, 1400px);
+  max-height: 90vh;
+  background: #111827;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.image-preview-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+}
+
+.image-preview-full {
+  display: block;
+  max-width: min(90vw, 1360px);
+  max-height: calc(90vh - 24px);
+  object-fit: contain;
 }
 
 @media (max-width: 768px) {
