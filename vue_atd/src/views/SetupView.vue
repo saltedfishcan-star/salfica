@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import draggable from 'vuedraggable'
 import type { BoardConfig, ImageItem, TierConfig } from '../lib/board'
 import {
   MAX_TIERS,
@@ -512,27 +513,38 @@ function startBoard(): void {
         <span>{{ tierCount }} / {{ MAX_TIERS }}</span>
       </div>
 
-      <div class="tier-list">
-        <div v-for="(tier, index) in config.tiers" :key="tier.id" class="tier-item">
-          <input v-model="tier.label" class="text-input tier-label" maxlength="20" placeholder="等级文案" />
+      <draggable
+        v-model="config.tiers"
+        item-key="id"
+        class="tier-list"
+        handle=".tier-drag-handle"
+        ghost-class="tier-ghost"
+        chosen-class="tier-chosen"
+        :animation="180"
+      >
+        <template #item="{ element: tier, index }">
+          <div class="tier-item">
+            <button type="button" class="tier-drag-handle" title="拖拽排序" aria-label="拖拽排序">拖拽</button>
+            <input v-model="tier.label" class="text-input tier-label" maxlength="20" placeholder="等级文案" />
 
-          <div class="tier-color-tools">
-            <button
-              v-for="preset in PRESET_LEVEL_COLORS"
-              :key="`${tier.id}-${preset}`"
-              type="button"
-              class="color-swatch"
-              :class="{ 'color-swatch--active': tier.color === preset }"
-              :style="{ backgroundColor: preset }"
-              :title="preset"
-              @click="setTierColor(tier, preset)"
-            />
-            <input class="color-picker" type="color" :value="tier.color" @input="onTierColorInput(tier, $event)" />
+            <div class="tier-color-tools">
+              <button
+                v-for="preset in PRESET_LEVEL_COLORS"
+                :key="`${tier.id}-${preset}`"
+                type="button"
+                class="color-swatch"
+                :class="{ 'color-swatch--active': tier.color === preset }"
+                :style="{ backgroundColor: preset }"
+                :title="preset"
+                @click="setTierColor(tier, preset)"
+              />
+              <input class="color-picker" type="color" :value="tier.color" @input="onTierColorInput(tier, $event)" />
+            </div>
+
+            <button type="button" class="danger-btn" :disabled="tierCount <= MIN_TIERS" @click="removeTier(index)">删除</button>
           </div>
-
-          <button type="button" class="danger-btn" :disabled="tierCount <= MIN_TIERS" @click="removeTier(index)">删除</button>
-        </div>
-      </div>
+        </template>
+      </draggable>
 
       <button type="button" class="primary-btn" :disabled="tierCount >= MAX_TIERS" @click="addTier">新增等级</button>
     </section>
@@ -657,10 +669,31 @@ function startBoard(): void {
 }
 
 .tier-item {
+  margin-bottom: 15px;
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) auto auto;
+  grid-template-columns: auto minmax(140px, 1fr) auto auto;
   gap: 10px;
   align-items: center;
+}
+
+.tier-drag-handle {
+  border: 1px solid #9ca3af;
+  border-radius: 8px;
+  background: #f9fafb;
+  height: 34px;
+  padding: 0 10px;
+  cursor: grab;
+  color: #374151;
+  font-size: 12px;
+}
+
+.tier-ghost {
+  opacity: 0.45;
+}
+
+.tier-chosen {
+  outline: 2px solid #111827;
+  outline-offset: 2px;
 }
 
 .tier-color-tools {
@@ -823,8 +856,8 @@ function startBoard(): void {
 .start-btn {
   height: 40px;
   padding: 0 18px;
-  background: #065f46;
-  border-color: #065f46;
+  background: #111827;
+  border-color: #111827;
   color: #ffffff;
 }
 
