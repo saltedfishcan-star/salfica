@@ -1,0 +1,59 @@
+HELP.md
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Common Runtime / OS ###
+.DS_Store
+Thumbs.db
+*.tmp
+*.temp
+
+### Environment Files ###
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+### Logs / Crash Dumps ###
+*.log
+hs_err_pid*
+replay_pid*
+
+### Frontend Artifacts (vue_atd) ###
+vue_atd/node_modules/
+vue_atd/dist/
+vue_atd/dist-ssr/
+vue_atd/coverage/
+vue_atd/.vite/
+vue_atd/.eslintcache
+vue_atd/*.tsbuildinfo
