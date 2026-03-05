@@ -27,6 +27,7 @@ interface ResolveApiResponse {
 const router = useRouter()
 const config = ref<BoardConfig>(loadBoardConfigOrDefault())
 const imageUrlInput = ref<string>('')
+const filePickerRef = ref<HTMLInputElement | null>(null)
 const isResolvingInput = ref(false)
 const isSearchDropActive = ref(false)
 const message = ref<string>('')
@@ -375,6 +376,24 @@ async function addImagesFromInput(): Promise<void> {
   await addImagesFromText(imageUrlInput.value)
 }
 
+function triggerFilePicker(): void {
+  if (isResolvingInput.value) {
+    return
+  }
+  filePickerRef.value?.click()
+}
+
+async function onFilePickerChange(event: Event): Promise<void> {
+  const target = event.target
+  if (!(target instanceof HTMLInputElement) || !target.files) {
+    return
+  }
+
+  const files = Array.from(target.files)
+  target.value = ''
+  await addImagesFromFiles(files)
+}
+
 function onSearchDragOver(event: DragEvent): void {
   event.preventDefault()
   isSearchDropActive.value = true
@@ -527,22 +546,23 @@ function startBoard(): void {
           @dragleave="onSearchDragLeave"
           @drop="onSearchDrop"
         >
+          <input ref="filePickerRef" class="file-picker-hidden" type="file" accept="image/*" multiple @change="onFilePickerChange" />
           <div class="url-row">
+            <button type="button" class="primary-btn" :disabled="isResolvingInput" @click="triggerFilePicker">
+              选择文件
+            </button>
             <input
               v-model="imageUrlInput"
               class="text-input"
-              placeholder="粘贴链接，或拖拽图片/网页链接到这里"
+              placeholder="拖拽图片到这里，或输入url链接，按enter解析。"
               @keydown.enter.prevent="addImagesFromInput"
             />
-            <button type="button" class="primary-btn" :disabled="isResolvingInput" @click="addImagesFromInput">
-              {{ isResolvingInput ? '解析中...' : '解析并添加' }}
-            </button>
           </div>
         </div>
       </div>
 
       <p class="hint">
-        无需文件选择器。支持拖拽图片文件、图片地址、网页链接到搜索框自动解析（单次最多 {{ MAX_UPLOAD_COUNT }} 条/张）。
+        可点击“选择文件”添加本地图片，或粘贴/拖拽图片地址、网页链接自动解析（单次最多 {{ MAX_UPLOAD_COUNT }} 条/张）。
       </p>
 
       <div v-if="config.images.length > 0" class="image-grid">
@@ -717,8 +737,12 @@ function startBoard(): void {
 
 .url-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr;
   gap: 8px;
+}
+
+.file-picker-hidden {
+  display: none;
 }
 
 .hint {
