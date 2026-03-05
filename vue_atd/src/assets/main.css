@@ -1,6 +1,16 @@
 :root {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  color: #111827;
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+  --color-border-default: #d1d5db;
+  --color-border-muted: #9ca3af;
+  --color-border-strong: #1f2937;
+  --color-bg-panel: #ffffff;
+  --color-bg-muted: #e5e7eb;
+  --color-bg-app: #d3d3d3;
+  --color-bg-body: #4a4a4a;
+
+  color: var(--color-text-primary);
   background: #f8fafc;
 }
 
@@ -13,13 +23,13 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #4a4a4a;
+  background: var(--color-bg-body);
   caret-color: transparent;
 }
 
 #app {
   min-height: 100vh;
-  background: #d3d3d3;
+  background: var(--color-bg-app);
 }
 
 input,

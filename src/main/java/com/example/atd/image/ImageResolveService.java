@@ -25,6 +25,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -40,6 +41,18 @@ public class ImageResolveService {
     private static final int MAX_HTML_BYTES = 2 * 1024 * 1024;
     private static final int MAX_IMAGE_BYTES = 10 * 1024 * 1024;
     private static final String USER_AGENT = "ATD-ImageResolver/1.0 (+https://example.local)";
+    private static final int MIN_CANDIDATE_SIDE = 180;
+    private static final int MIN_CANDIDATE_AREA = 50_000;
+    private static final int HIGH_QUALITY_SIDE = 1_000;
+    private static final int HIGH_QUALITY_AREA = 500_000;
+    private static final int LOW_QUALITY_SIDE = 320;
+    private static final int LOW_QUALITY_AREA = 120_000;
+    private static final List<String> POSITIVE_QUALITY_HINTS = List.of(
+            "original", "large", "master", "4k", "1080", "2048"
+    );
+    private static final List<String> NEGATIVE_QUALITY_HINTS = List.of(
+            "thumb", "thumbnail", "small", "avatar", "icon", "logo", "sprite"
+    );
 
     private static final List<String> IMAGE_SUFFIXES = List.of(
             ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".avif"
@@ -115,7 +128,7 @@ public class ImageResolveService {
      */
     private ResolveImageResponse resolveInternal(URI source) {
         if (looksLikeDirectImage(source.getPath())) {
-            return ResolveImageResponse.ok(source.toString(), buildProxyUrl(source));
+            return ResolveImageResponse.ok(source.toString(), buildProxyUrl(source), null, null, "normal");
         }
 
         HttpFetchResult fetched;
@@ -141,17 +154,21 @@ public class ImageResolveService {
             if (parseAndValidate(finalUri.toString()) == null) {
                 return ResolveImageResponse.failed("blocked_image_host");
             }
-            return ResolveImageResponse.ok(finalUri.toString(), buildProxyUrl(finalUri));
+            return ResolveImageResponse.ok(finalUri.toString(), buildProxyUrl(finalUri), null, null, "normal");
         }
 
         String html = decodeBody(fetched.body(), fetched.contentType());
-        Optional<URI> imageUrl = extractImageUrl(html, fetched.finalUri());
-        if (imageUrl.isEmpty()) {
+        Optional<SelectedCandidate> imageCandidate = extractImageCandidate(html, fetched.finalUri());
+        if (imageCandidate.isEmpty()) {
             return ResolveImageResponse.failed("no_image_found");
         }
 
-        URI resolved = imageUrl.get();
-        return ResolveImageResponse.ok(resolved.toString(), buildProxyUrl(resolved));
+        SelectedCandidate selected = imageCandidate.get();
+        URI resolved = selected.candidate().uri();
+        Integer width = selected.candidate().width() > 0 ? selected.candidate().width() : null;
+        Integer height = selected.candidate().height() > 0 ? selected.candidate().height() : null;
+        String qualityHint = qualityHint(width, height, selected.forcedLowQuality());
+        return ResolveImageResponse.ok(resolved.toString(), buildProxyUrl(resolved), width, height, qualityHint);
     }
 
     /**
@@ -222,57 +239,180 @@ public class ImageResolveService {
     }
 
     /**
-     * 从 HTML 中提取图片地址，优先使用 og:image / twitter:image，再回退 img 标签。
+     * 从 HTML 中提取最合适图片：
+     * - 合并 meta/img/srcset 候选；
+     * - 通过尺寸 + 关键词综合打分；
+     * - 过滤明显小图，若全部被过滤则回退并标记低清风险。
      */
-    private Optional<URI> extractImageUrl(String html, URI baseUri) {
+    private Optional<SelectedCandidate> extractImageCandidate(String html, URI baseUri) {
         Document document = Jsoup.parse(html, baseUri.toString());
+        Map<String, ImageCandidate> candidates = new LinkedHashMap<>();
 
         Elements metaCandidates = document.select(
                 "meta[property=og:image],meta[name=og:image],meta[property=og:image:url],meta[name=twitter:image],meta[property=twitter:image]"
         );
         for (Element element : metaCandidates) {
-            Optional<URI> candidate = resolveToPublicUri(baseUri, element.attr("content"));
-            if (candidate.isPresent()) {
-                return candidate;
-            }
+            addUrlCandidate(candidates, baseUri, element.attr("content"), "", -1, -1);
         }
 
-        URI best = null;
-        int bestScore = -1;
-        URI fallback = null;
+        for (Element img : document.select("img[src],img[data-src],img[data-original],img[srcset],img[data-srcset]")) {
+            String textHints = (img.attr("class") + " " + img.attr("id") + " " + img.attr("alt")).toLowerCase(Locale.ROOT);
+            int width = parseDimension(img.attr("width"));
+            int height = parseDimension(img.attr("height"));
 
-        for (Element img : document.select("img[src],img[data-src],img[data-original]")) {
             String raw = firstNonBlank(img.attr("src"), img.attr("data-src"), img.attr("data-original"));
-            Optional<URI> candidate = resolveToPublicUri(baseUri, raw);
-            if (candidate.isEmpty()) {
+            addUrlCandidate(candidates, baseUri, raw, textHints, width, height);
+
+            String srcset = firstNonBlank(img.attr("srcset"), img.attr("data-srcset"));
+            addSrcsetCandidates(candidates, baseUri, srcset, textHints, width, height);
+        }
+
+        ImageCandidate best = null;
+        ImageCandidate fallback = null;
+        for (ImageCandidate candidate : candidates.values()) {
+            if (fallback == null) {
+                fallback = candidate;
+            }
+            if (isLowResolutionCandidate(candidate)) {
                 continue;
             }
-
-            URI uri = candidate.get();
-            if (fallback == null) {
-                fallback = uri;
-            }
-
-            int score = imageScore(img);
-            if (score > bestScore) {
-                bestScore = score;
-                best = uri;
+            if (best == null || candidate.score() > best.score()) {
+                best = candidate;
             }
         }
 
         if (best != null) {
-            return Optional.of(best);
+            return Optional.of(new SelectedCandidate(best, false));
         }
-        return Optional.ofNullable(fallback);
+        if (fallback != null) {
+            return Optional.of(new SelectedCandidate(fallback, true));
+        }
+        return Optional.empty();
     }
 
-    private int imageScore(Element img) {
-        int width = parseDimension(img.attr("width"));
-        int height = parseDimension(img.attr("height"));
-        if (width <= 0 || height <= 0) {
-            return 0;
+    private void addUrlCandidate(
+            Map<String, ImageCandidate> candidates,
+            URI baseUri,
+            String rawUrl,
+            String textHints,
+            int width,
+            int height
+    ) {
+        Optional<URI> resolved = resolveToPublicUri(baseUri, rawUrl);
+        if (resolved.isEmpty()) {
+            return;
         }
-        return width * height;
+        URI uri = resolved.get();
+        int score = scoreCandidate(uri.toString(), textHints, width, height);
+        mergeCandidate(candidates, new ImageCandidate(uri, width, height, score));
+    }
+
+    private void addSrcsetCandidates(
+            Map<String, ImageCandidate> candidates,
+            URI baseUri,
+            String srcset,
+            String textHints,
+            int fallbackWidth,
+            int fallbackHeight
+    ) {
+        if (srcset == null || srcset.isBlank()) {
+            return;
+        }
+
+        for (String rawPart : srcset.split(",")) {
+            String part = rawPart.trim();
+            if (part.isEmpty()) {
+                continue;
+            }
+
+            String[] tokens = part.split("\\s+");
+            if (tokens.length == 0) {
+                continue;
+            }
+
+            String url = tokens[0];
+            int width = fallbackWidth;
+            int height = fallbackHeight;
+            if (tokens.length >= 2) {
+                int[] parsedSize = parseSrcsetDescriptor(tokens[1], fallbackWidth, fallbackHeight);
+                width = parsedSize[0];
+                height = parsedSize[1];
+            }
+
+            addUrlCandidate(candidates, baseUri, url, textHints, width, height);
+        }
+    }
+
+    private int[] parseSrcsetDescriptor(String descriptor, int fallbackWidth, int fallbackHeight) {
+        if (descriptor == null || descriptor.isBlank()) {
+            return new int[]{fallbackWidth, fallbackHeight};
+        }
+
+        String normalized = descriptor.trim().toLowerCase(Locale.ROOT);
+        try {
+            if (normalized.endsWith("w")) {
+                int width = Integer.parseInt(normalized.substring(0, normalized.length() - 1));
+                if (width > 0) {
+                    int height = (fallbackHeight > 0 && fallbackWidth > 0)
+                            ? Math.max(1, Math.round(width * (fallbackHeight / (float) fallbackWidth)))
+                            : Math.max(1, Math.round(width * 0.75f));
+                    return new int[]{width, height};
+                }
+            }
+
+            if (normalized.endsWith("x")) {
+                double ratio = Double.parseDouble(normalized.substring(0, normalized.length() - 1));
+                if (ratio > 0) {
+                    int width = fallbackWidth > 0 ? Math.max(1, (int) Math.round(fallbackWidth * ratio)) : Math.max(1, (int) Math.round(320 * ratio));
+                    int height = fallbackHeight > 0 ? Math.max(1, (int) Math.round(fallbackHeight * ratio)) : Math.max(1, (int) Math.round(180 * ratio));
+                    return new int[]{width, height};
+                }
+            }
+        } catch (NumberFormatException ignored) {
+            // Ignore invalid descriptor and keep fallback values.
+        }
+
+        return new int[]{fallbackWidth, fallbackHeight};
+    }
+
+    private int scoreCandidate(String url, String textHints, int width, int height) {
+        int score = 10_000;
+
+        if (width > 0 && height > 0) {
+            long area = (long) width * height;
+            score += (int) Math.min(area, 5_000_000L);
+        }
+
+        String merged = (url + " " + textHints).toLowerCase(Locale.ROOT);
+        for (String keyword : POSITIVE_QUALITY_HINTS) {
+            if (merged.contains(keyword)) {
+                score += 120_000;
+            }
+        }
+        for (String keyword : NEGATIVE_QUALITY_HINTS) {
+            if (merged.contains(keyword)) {
+                score -= 200_000;
+            }
+        }
+        return score;
+    }
+
+    private boolean isLowResolutionCandidate(ImageCandidate candidate) {
+        int width = candidate.width();
+        int height = candidate.height();
+        if (width <= 0 || height <= 0) {
+            return false;
+        }
+        long area = (long) width * height;
+        return width < MIN_CANDIDATE_SIDE || height < MIN_CANDIDATE_SIDE || area < MIN_CANDIDATE_AREA;
+    }
+
+    private void mergeCandidate(Map<String, ImageCandidate> candidates, ImageCandidate next) {
+        String key = next.uri().toString();
+        ImageCandidate current = candidates.get(key);
+        if (current == null || next.score() > current.score()) {
+            candidates.put(key, next);
+        }
     }
 
     private int parseDimension(String raw) {
@@ -285,6 +425,25 @@ public class ImageResolveService {
         } catch (NumberFormatException ignored) {
             return -1;
         }
+    }
+
+    private String qualityHint(Integer width, Integer height, boolean forcedLowQuality) {
+        if (forcedLowQuality) {
+            return "low";
+        }
+
+        if (width == null || height == null || width <= 0 || height <= 0) {
+            return "normal";
+        }
+
+        long area = (long) width * height;
+        if ((width >= HIGH_QUALITY_SIDE || height >= HIGH_QUALITY_SIDE) && area >= HIGH_QUALITY_AREA) {
+            return "high";
+        }
+        if (width < LOW_QUALITY_SIDE || height < LOW_QUALITY_SIDE || area < LOW_QUALITY_AREA) {
+            return "low";
+        }
+        return "normal";
     }
 
     private Optional<URI> resolveToPublicUri(URI baseUri, String raw) {
@@ -469,6 +628,12 @@ public class ImageResolveService {
      */
     private void putCached(String key, ResolveImageResponse response) {
         resolveCache.put(key, new CacheEntry(response, Instant.now().plus(CACHE_TTL)));
+    }
+
+    private record ImageCandidate(URI uri, int width, int height, int score) {
+    }
+
+    private record SelectedCandidate(ImageCandidate candidate, boolean forcedLowQuality) {
     }
 
     private record HttpFetchResult(int statusCode, URI finalUri, byte[] body, String contentType) {

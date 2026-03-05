@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import draggable from 'vuedraggable'
-import type { BoardConfig, ImageItem, TierConfig } from '../lib/board'
+import type { BoardConfig, ImageItem, QualityHint, TierConfig } from '../lib/board'
 import {
   MAX_TIERS,
   MAX_UPLOAD_COUNT,
@@ -23,6 +23,9 @@ interface ResolveApiResponse {
   resolvedImageUrl?: string
   proxyUrl?: string
   reason?: string
+  selectedWidth?: number
+  selectedHeight?: number
+  qualityHint?: QualityHint
 }
 
 const router = useRouter()
@@ -51,6 +54,39 @@ function showMessage(next: string): void {
 
 function clearMessage(): void {
   message.value = ''
+}
+
+function appendMessagePart(parts: string[], condition: boolean, content: string): void {
+  if (condition) {
+    parts.push(content)
+  }
+}
+
+function joinSummary(parts: string[], fallback: string): string {
+  return parts.length > 0 ? parts.join(' ') : fallback
+}
+
+async function runWithResolvingLock(task: () => Promise<void>): Promise<void> {
+  if (isResolvingInput.value) {
+    return
+  }
+  isResolvingInput.value = true
+  try {
+    await task()
+  } finally {
+    isResolvingInput.value = false
+  }
+}
+
+function markImageAsFailed(image: ImageItem): void {
+  failedImages.value = {
+    ...failedImages.value,
+    [image.id]: true,
+  }
+  if (image.resolveStatus !== 'failed') {
+    image.resolveStatus = 'failed'
+    image.resolveReason = image.resolveReason ?? '浏览器加载图片失败。'
+  }
 }
 
 function setTierColor(tier: TierConfig, color: string): void {
@@ -142,9 +178,19 @@ async function resolveRemoteImage(url: string): Promise<ImageItem> {
 
     const data = (await response.json()) as ResolveApiResponse
     if (data.status === 'ok' && data.proxyUrl) {
+      const width = typeof data.selectedWidth === 'number' && data.selectedWidth > 0 ? Math.round(data.selectedWidth) : undefined
+      const height = typeof data.selectedHeight === 'number' && data.selectedHeight > 0 ? Math.round(data.selectedHeight) : undefined
+      const qualityHint =
+        data.qualityHint === 'high' || data.qualityHint === 'normal' || data.qualityHint === 'low'
+          ? data.qualityHint
+          : detectQualityHint(width, height)
+
       return createImage(data.proxyUrl, {
         originalUrl: url,
         resolveStatus: 'ok',
+        width,
+        height,
+        qualityHint,
       })
     }
 
@@ -191,33 +237,26 @@ function getImageDimensions(src: string): Promise<{ width: number; height: numbe
 }
 
 // 从拖拽的 HTML 片段中提取 src/href 里的 URL。
+function normalizeHttpUrls(candidates: string[]): string[] {
+  const normalized = candidates
+    .map((item) => item.trim().replace(/[),.;!?]+$/g, ''))
+    .filter((item) => isHttpImageUrl(item))
+  return Array.from(new Set(normalized))
+}
+
+// 从拖拽的 HTML 片段中提取 src/href 里的 URL。
 function extractUrlsFromHtml(html: string): string[] {
   if (!html.trim()) {
     return []
   }
-  const attrMatches = html.match(/(?:src|href)\s*=\s*["']([^"']+)["']/gi) ?? []
-  const fromAttrs = attrMatches
-    .map((item) => {
-      const match = item.match(/["']([^"']+)["']/)
-      return match?.[1]?.trim() ?? ''
-    })
-    .filter((item) => isHttpImageUrl(item))
-
+  const fromAttrs = Array.from(html.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi), (item) => item[1] ?? '')
   const directMatches = html.match(/https?:\/\/[^\s"'<>]+/gi) ?? []
-  const normalized = [...fromAttrs, ...directMatches]
-    .map((item) => item.trim().replace(/[),.;!?]+$/g, ''))
-    .filter((item) => isHttpImageUrl(item))
-
-  return Array.from(new Set(normalized))
+  return normalizeHttpUrls([...fromAttrs, ...directMatches])
 }
 
 // 从任意文本中提取 http/https URL 并去重。
 function extractHttpUrls(text: string): string[] {
-  const matches = text.match(/https?:\/\/[^\s"'<>]+/gi) ?? []
-  const normalized = matches
-    .map((item) => item.trim().replace(/[),.;!?]+$/g, ''))
-    .filter((item) => isHttpImageUrl(item))
-  return Array.from(new Set(normalized))
+  return normalizeHttpUrls(text.match(/https?:\/\/[^\s"'<>]+/gi) ?? [])
 }
 
 function formatSize(fileSize: number): string {
@@ -225,6 +264,38 @@ function formatSize(fileSize: number): string {
     return `${Math.max(1, Math.round(fileSize / 1024))}KB`
   }
   return `${(fileSize / (1024 * 1024)).toFixed(1)}MB`
+}
+
+function detectQualityHint(width?: number, height?: number): QualityHint | undefined {
+  if (typeof width !== 'number' || typeof height !== 'number' || width <= 0 || height <= 0) {
+    return undefined
+  }
+  const area = width * height
+  if ((width >= 1000 || height >= 1000) && area >= 500000) {
+    return 'high'
+  }
+  if (width < 320 || height < 320 || area < 120000) {
+    return 'low'
+  }
+  return 'normal'
+}
+
+function imageDimensionsText(image: ImageItem): string {
+  if (typeof image.width === 'number' && typeof image.height === 'number') {
+    return `${image.width}x${image.height}`
+  }
+  return '尺寸未知'
+}
+
+function isLowQualityImage(image: ImageItem): boolean {
+  if (image.qualityHint === 'low') {
+    return true
+  }
+  if (typeof image.width === 'number' && typeof image.height === 'number') {
+    const area = image.width * image.height
+    return image.width < 320 || image.height < 320 || area < 120000
+  }
+  return false
 }
 
 async function addImagesFromFiles(files: File[]): Promise<void> {
@@ -240,9 +311,9 @@ async function addImagesFromFiles(files: File[]): Promise<void> {
   const details: string[] = []
   let addedCount = 0
   let duplicateCount = 0
+  let lowQualityCount = 0
 
-  isResolvingInput.value = true
-  try {
+  await runWithResolvingLock(async () => {
     for (const file of limitedFiles) {
       if (file.size > MAX_UPLOAD_SIZE_BYTES) {
         errors.push(`${file.name} 超过 10MB 限制。`)
@@ -257,11 +328,20 @@ async function addImagesFromFiles(files: File[]): Promise<void> {
           continue
         }
 
-        const image = createImage(dataUrl, { resolveStatus: 'ok' })
+        const dimensions = await getImageDimensions(dataUrl)
+        const qualityHint = detectQualityHint(dimensions?.width, dimensions?.height)
+        const image = createImage(dataUrl, {
+          resolveStatus: 'ok',
+          width: dimensions?.width,
+          height: dimensions?.height,
+          qualityHint,
+        })
         config.value.images.push(image)
         addedCount += 1
+        if (qualityHint === 'low') {
+          lowQualityCount += 1
+        }
 
-        const dimensions = await getImageDimensions(dataUrl)
         const sizeText = formatSize(file.size)
         if (dimensions) {
           details.push(`${file.name} (${dimensions.width}x${dimensions.height}, ${sizeText})`)
@@ -272,34 +352,22 @@ async function addImagesFromFiles(files: File[]): Promise<void> {
         errors.push(`${file.name} 读取失败。`)
       }
     }
-  } finally {
-    isResolvingInput.value = false
-  }
+  })
 
   imageUrlInput.value = ''
   const messageParts: string[] = []
 
-  if (addedCount > 0) {
-    messageParts.push(`已添加 ${addedCount} 张拖拽图片。`)
-  }
+  appendMessagePart(messageParts, addedCount > 0, `已添加 ${addedCount} 张拖拽图片。`)
   if (details.length > 0) {
     const preview = details.slice(0, 2).join('；')
     messageParts.push(`解析信息：${preview}${details.length > 2 ? '；...' : ''}`)
   }
-  if (duplicateCount > 0) {
-    messageParts.push(`已跳过 ${duplicateCount} 张重复图片。`)
-  }
-  if (skippedByCount > 0) {
-    messageParts.push(`单次最多解析 ${MAX_UPLOAD_COUNT} 张，已忽略 ${skippedByCount} 张。`)
-  }
-  if (errors.length > 0) {
-    messageParts.push(errors.join(' '))
-  }
-  if (messageParts.length === 0) {
-    messageParts.push('未添加新图片。')
-  }
+  appendMessagePart(messageParts, duplicateCount > 0, `已跳过 ${duplicateCount} 张重复图片。`)
+  appendMessagePart(messageParts, lowQualityCount > 0, `${lowQualityCount} 张图片分辨率偏低，导出可能模糊。`)
+  appendMessagePart(messageParts, skippedByCount > 0, `单次最多解析 ${MAX_UPLOAD_COUNT} 张，已忽略 ${skippedByCount} 张。`)
+  appendMessagePart(messageParts, errors.length > 0, errors.join(' '))
 
-  showMessage(messageParts.join(' '))
+  showMessage(joinSummary(messageParts, '未添加新图片。'))
 }
 
 // 解析文本中的链接并调用后端解析服务。
@@ -314,13 +382,13 @@ async function addImagesFromText(rawText: string): Promise<void> {
   const skippedByCount = urls.length - limitedUrls.length
   const existingUrls = new Set(config.value.images.map((item) => item.originalUrl ?? item.src))
 
-  isResolvingInput.value = true
   let addedCount = 0
   let failedCount = 0
   let skippedDuplicateCount = 0
+  let lowQualityCount = 0
   const parsedDetails: string[] = []
 
-  try {
+  await runWithResolvingLock(async () => {
     for (const url of limitedUrls) {
       if (existingUrls.has(url)) {
         skippedDuplicateCount += 1
@@ -334,51 +402,48 @@ async function addImagesFromText(rawText: string): Promise<void> {
 
       if (image.resolveStatus === 'failed') {
         failedCount += 1
-        failedImages.value = {
-          ...failedImages.value,
-          [image.id]: true,
-        }
+        markImageAsFailed(image)
       } else {
-        const dimensions = await getImageDimensions(image.src)
-        if (dimensions) {
-          parsedDetails.push(`${dimensions.width}x${dimensions.height}`)
+        if (typeof image.width !== 'number' || typeof image.height !== 'number') {
+          const measured = await getImageDimensions(image.src)
+          if (measured) {
+            image.width = measured.width
+            image.height = measured.height
+          }
+        }
+
+        const hint = image.qualityHint ?? detectQualityHint(image.width, image.height)
+        if (hint) {
+          image.qualityHint = hint
+        }
+        if (hint === 'low') {
+          lowQualityCount += 1
+        }
+
+        if (typeof image.width === 'number' && typeof image.height === 'number') {
+          parsedDetails.push(`${image.width}x${image.height}`)
         }
       }
     }
-  } finally {
-    isResolvingInput.value = false
-  }
+  })
 
   imageUrlInput.value = ''
 
   const messageParts: string[] = []
-  if (addedCount > 0) {
-    messageParts.push(`已添加 ${addedCount} 条链接。`)
-  }
-  if (failedCount > 0) {
-    messageParts.push(`${failedCount} 张图片解析失败，请检查来源链接。`)
-  }
-  if (skippedDuplicateCount > 0) {
-    messageParts.push(`已跳过 ${skippedDuplicateCount} 条重复链接。`)
-  }
-  if (skippedByCount > 0) {
-    messageParts.push(`单次最多解析 ${MAX_UPLOAD_COUNT} 条，已忽略 ${skippedByCount} 条。`)
-  }
+  appendMessagePart(messageParts, addedCount > 0, `已添加 ${addedCount} 条链接。`)
+  appendMessagePart(messageParts, failedCount > 0, `${failedCount} 张图片解析失败，请检查来源链接。`)
+  appendMessagePart(messageParts, skippedDuplicateCount > 0, `已跳过 ${skippedDuplicateCount} 条重复链接。`)
+  appendMessagePart(messageParts, lowQualityCount > 0, `${lowQualityCount} 张图片分辨率偏低，导出可能模糊。`)
+  appendMessagePart(messageParts, skippedByCount > 0, `单次最多解析 ${MAX_UPLOAD_COUNT} 条，已忽略 ${skippedByCount} 条。`)
   if (parsedDetails.length > 0) {
     const preview = parsedDetails.slice(0, 3).join('，')
     messageParts.push(`图片信息：${preview}${parsedDetails.length > 3 ? '，...' : ''}`)
   }
-  if (messageParts.length === 0) {
-    messageParts.push('未添加新图片，请检查链接是否重复。')
-  }
 
-  showMessage(messageParts.join(' '))
+  showMessage(joinSummary(messageParts, '未添加新图片，请检查链接是否重复。'))
 }
 
 async function addImagesFromInput(): Promise<void> {
-  if (isResolvingInput.value) {
-    return
-  }
   await addImagesFromText(imageUrlInput.value)
 }
 
@@ -451,14 +516,7 @@ function removeImage(id: string): void {
 }
 
 function markImageFailed(image: ImageItem): void {
-  failedImages.value = {
-    ...failedImages.value,
-    [image.id]: true,
-  }
-  if (image.resolveStatus !== 'failed') {
-    image.resolveStatus = 'failed'
-    image.resolveReason = image.resolveReason ?? '浏览器加载图片失败。'
-  }
+  markImageAsFailed(image)
 }
 
 function isImageFailed(image: ImageItem): boolean {
@@ -589,6 +647,10 @@ function startBoard(): void {
             <span>图片不可用</span>
             <span>{{ image.resolveReason ?? '请更换为可访问的图片地址。' }}</span>
           </div>
+          <div class="image-meta">
+            <span class="image-dimensions">{{ imageDimensionsText(image) }}</span>
+            <span v-if="isLowQualityImage(image)" class="image-quality-low">低清风险</span>
+          </div>
           <button type="button" class="remove-image" @click="removeImage(image.id)">删除</button>
         </div>
       </div>
@@ -598,7 +660,7 @@ function startBoard(): void {
     <p v-if="message" class="message">{{ message }}</p>
 
     <footer class="setup-footer">
-      <button type="button" class="start-btn" @click="startBoard">进入榜单</button>
+      <button type="button" class="primary-btn start-btn" @click="startBoard">进入榜单</button>
     </footer>
   </section>
 </template>
@@ -608,7 +670,7 @@ function startBoard(): void {
   max-width: 960px;
   margin: 0 auto;
   padding: 24px;
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 .setup-header h1 {
@@ -623,8 +685,8 @@ function startBoard(): void {
 
 .panel {
   margin-top: 18px;
-  border: 1px solid #d1d5db;
-  background: #ffffff;
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-panel);
   border-radius: 10px;
   padding: 16px;
 }
@@ -642,7 +704,7 @@ function startBoard(): void {
 }
 
 .panel-head span {
-  color: #6b7280;
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
@@ -655,7 +717,7 @@ function startBoard(): void {
 .text-input {
   width: 100%;
   height: 36px;
-  border: 1px solid #9ca3af;
+  border: 1px solid var(--color-border-muted);
   border-radius: 8px;
   padding: 0 10px;
   font-size: 14px;
@@ -669,7 +731,6 @@ function startBoard(): void {
 }
 
 .tier-item {
-  margin-bottom: 15px;
   display: grid;
   grid-template-columns: auto minmax(140px, 1fr) auto auto;
   gap: 10px;
@@ -677,7 +738,7 @@ function startBoard(): void {
 }
 
 .tier-drag-handle {
-  border: 1px solid #9ca3af;
+  border: 1px solid var(--color-border-muted);
   border-radius: 8px;
   background: #f9fafb;
   height: 34px;
@@ -692,7 +753,7 @@ function startBoard(): void {
 }
 
 .tier-chosen {
-  outline: 2px solid #111827;
+  outline: 2px solid var(--color-text-primary);
   outline-offset: 2px;
 }
 
@@ -705,21 +766,21 @@ function startBoard(): void {
 .color-swatch {
   width: 18px;
   height: 18px;
-  border: 1px solid #111827;
+  border: 1px solid var(--color-text-primary);
   border-radius: 3px;
   padding: 0;
   cursor: pointer;
 }
 
 .color-swatch--active {
-  outline: 2px solid #111827;
+  outline: 2px solid var(--color-text-primary);
   outline-offset: 1px;
 }
 
 .color-picker {
   width: 34px;
   height: 22px;
-  border: 1px solid #111827;
+  border: 1px solid var(--color-text-primary);
   border-radius: 4px;
   background: transparent;
   padding: 0;
@@ -727,11 +788,10 @@ function startBoard(): void {
 }
 
 .primary-btn,
-.danger-btn,
-.start-btn {
-  border: 1px solid #111827;
+.danger-btn {
+  border: 1px solid var(--color-text-primary);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--color-bg-panel);
   height: 34px;
   padding: 0 12px;
   cursor: pointer;
@@ -739,8 +799,8 @@ function startBoard(): void {
 }
 
 .primary-btn {
-  background: #111827;
-  color: #ffffff;
+  background: var(--color-text-primary);
+  color: var(--color-bg-panel);
 }
 
 .danger-btn {
@@ -761,10 +821,10 @@ function startBoard(): void {
 }
 
 .search-drop-zone {
-  border: 1px dashed #9ca3af;
+  border: 1px dashed var(--color-border-muted);
   border-radius: 10px;
   padding: 10px;
-  background: #ffffff;
+  background: var(--color-bg-panel);
   transition: border-color 120ms ease, background-color 120ms ease;
 }
 
@@ -785,7 +845,7 @@ function startBoard(): void {
 
 .hint {
   margin: 10px 0 0;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
@@ -797,7 +857,7 @@ function startBoard(): void {
 }
 
 .image-card {
-  border: 1px solid #9ca3af;
+  border: 1px solid var(--color-border-muted);
   border-radius: 8px;
   overflow: hidden;
   background: #f3f4f6;
@@ -810,6 +870,27 @@ function startBoard(): void {
   display: block;
 }
 
+.image-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--color-border-muted);
+  background: var(--color-bg-panel);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.image-dimensions {
+  white-space: nowrap;
+}
+
+.image-quality-low {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
 .image-fallback {
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -818,9 +899,9 @@ function startBoard(): void {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   font-size: 12px;
-  background: #e5e7eb;
+  background: var(--color-bg-muted);
   text-align: center;
   padding: 8px;
 }
@@ -828,19 +909,18 @@ function startBoard(): void {
 .remove-image {
   width: 100%;
   border: 0;
-  border-top: 1px solid #9ca3af;
-  background: #ffffff;
+  background: var(--color-bg-panel);
   height: 30px;
   cursor: pointer;
 }
 
 .empty-state {
   margin-top: 12px;
-  border: 1px dashed #9ca3af;
+  border: 1px dashed var(--color-border-muted);
   border-radius: 8px;
   padding: 20px;
   text-align: center;
-  color: #6b7280;
+  color: var(--color-text-secondary);
 }
 
 .message {
@@ -856,9 +936,6 @@ function startBoard(): void {
 .start-btn {
   height: 40px;
   padding: 0 18px;
-  background: #111827;
-  border-color: #111827;
-  color: #ffffff;
 }
 
 @media (max-width: 768px) {

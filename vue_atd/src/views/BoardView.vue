@@ -7,6 +7,7 @@ import { loadBoardConfig, loadBoardState, saveBoardState } from '../lib/board'
 
 const router = useRouter()
 const DRAG_GROUP = { name: 'ranking', pull: true, put: true }
+const EXPORT_SCALE = 3
 
 // 没有配置时回到配置页，避免空页面。
 const config = ref<BoardConfig | null>(loadBoardConfig())
@@ -130,7 +131,7 @@ async function downloadRankTable(): Promise<void> {
     const { default: html2canvas } = await import('html2canvas')
     const canvas = await html2canvas(rankTable, {
       backgroundColor: '#ffffff',
-      scale: Math.max(window.devicePixelRatio || 1, 2),
+      scale: Math.max(window.devicePixelRatio || 1, EXPORT_SCALE),
       width: rankTable.scrollWidth,
       height: rankTable.scrollHeight,
       useCORS: true,
@@ -277,15 +278,9 @@ onUnmounted(() => {
   font-size: calc(32px * var(--page-scale));
 }
 
-.heading p {
-  margin: calc(8px * var(--page-scale)) 0 0;
-  color: #374151;
-  font-size: calc(16px * var(--page-scale));
-}
-
 .rank-table {
-  border: calc(1px * var(--page-scale)) solid #d1d5db;
-  background: #ffffff;
+  border: calc(1px * var(--page-scale)) solid var(--color-border-default);
+  background: var(--color-bg-panel);
 }
 
 .rank-row {
@@ -295,7 +290,7 @@ onUnmounted(() => {
 }
 
 .rank-row + .rank-row {
-  border-top: calc(1px * var(--page-scale)) solid #d1d5db;
+  border-top: calc(1px * var(--page-scale)) solid var(--color-border-default);
 }
 
 .rank-level {
@@ -303,7 +298,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   text-align: center;
-  border-right: calc(1px * var(--page-scale)) solid #d1d5db;
+  border-right: calc(1px * var(--page-scale)) solid var(--color-border-default);
   padding: calc(8px * var(--page-scale));
 }
 
@@ -320,14 +315,14 @@ onUnmounted(() => {
 
 .pool-panel {
   margin-top: calc(18px * var(--page-scale));
-  border: calc(1px * var(--page-scale)) solid #d1d5db;
+  border: calc(1px * var(--page-scale)) solid var(--color-border-default);
   padding: calc(12px * var(--page-scale));
   height: 25vh;
   min-height: 25vh;
   max-height: 25vh;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
+  background: var(--color-bg-panel);
 }
 
 .pool-head {
@@ -339,7 +334,7 @@ onUnmounted(() => {
 }
 
 .pool-head span {
-  color: #6b7280;
+  color: var(--color-text-secondary);
   font-size: calc(13px * var(--page-scale));
 }
 
@@ -366,8 +361,8 @@ onUnmounted(() => {
   width: var(--card-width);
   flex: 0 0 var(--card-width);
   height: var(--card-height);
-  border: 1px solid #1f2937;
-  background: #e5e7eb;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-muted);
   overflow: hidden;
   cursor: grab;
   user-select: none;
@@ -388,7 +383,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   font-size: 11px;
   text-align: center;
   padding: 6px;
@@ -399,8 +394,8 @@ onUnmounted(() => {
 }
 
 .block-chosen {
-  outline: 2px solid #111827;
-  outline-offset: 2px;
+  /* 使用内侧描边，避免拖拽高亮看起来比图片块更大。 */
+  box-shadow: inset 0 0 0 2px var(--color-text-primary);
 }
 
 .floating-actions {
@@ -414,7 +409,7 @@ onUnmounted(() => {
 }
 
 .floating-button {
-  border: 1px solid #111827;
+  border: 1px solid var(--color-text-primary);
   border-radius: 999px;
   height: 42px;
   padding: 0 16px;
@@ -429,13 +424,13 @@ onUnmounted(() => {
 }
 
 .floating-download {
-  background: #ffffff;
-  color: #111827;
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
 }
 
 .floating-edit {
-  background: #111827;
-  color: #ffffff;
+  background: var(--color-text-primary);
+  color: var(--color-bg-panel);
 }
 
 .download-status {
@@ -449,7 +444,7 @@ onUnmounted(() => {
   line-height: 1.3;
   border: 1px solid transparent;
   background: #f3f4f6;
-  color: #111827;
+  color: var(--color-text-primary);
   z-index: 20;
 }
 

@@ -5,6 +5,7 @@ export interface TierConfig {
 }
 
 export type ResolveStatus = 'ok' | 'failed'
+export type QualityHint = 'high' | 'normal' | 'low'
 
 export interface ImageItem {
   id: string
@@ -12,6 +13,9 @@ export interface ImageItem {
   originalUrl?: string
   resolveStatus?: ResolveStatus
   resolveReason?: string
+  width?: number
+  height?: number
+  qualityHint?: QualityHint
 }
 
 export interface BoardConfig {
@@ -33,6 +37,29 @@ export const MAX_TIERS = 10
 export const MAX_UPLOAD_COUNT = 50
 export const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 export const PRESET_LEVEL_COLORS: string[] = ['#ef4444', '#f97316', '#facc15', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6']
+
+let memoryBoardConfig: BoardConfig | null = null
+let memoryBoardState: BoardState | null = null
+
+function cloneValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function readLocalStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeLocalStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // 存储超限或隐私模式下可能失败；调用方使用内存兜底继续流程。
+  }
+}
 
 function createId(prefix: string): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -88,6 +115,13 @@ function isImageItem(value: unknown): value is ImageItem {
   const image = value as ImageItem
   const isResolveStatusValid =
     typeof image.resolveStatus === 'undefined' || image.resolveStatus === 'ok' || image.resolveStatus === 'failed'
+  const isWidthValid = typeof image.width === 'undefined' || (Number.isFinite(image.width) && image.width > 0)
+  const isHeightValid = typeof image.height === 'undefined' || (Number.isFinite(image.height) && image.height > 0)
+  const isQualityHintValid =
+    typeof image.qualityHint === 'undefined' ||
+    image.qualityHint === 'high' ||
+    image.qualityHint === 'normal' ||
+    image.qualityHint === 'low'
 
   return (
     typeof image.id === 'string' &&
@@ -95,7 +129,10 @@ function isImageItem(value: unknown): value is ImageItem {
     image.src.length > 0 &&
     (typeof image.originalUrl === 'undefined' || typeof image.originalUrl === 'string') &&
     (typeof image.resolveReason === 'undefined' || typeof image.resolveReason === 'string') &&
-    isResolveStatusValid
+    isResolveStatusValid &&
+    isWidthValid &&
+    isHeightValid &&
+    isQualityHintValid
   )
 }
 
@@ -153,6 +190,13 @@ function normalizeConfig(input: BoardConfig): BoardConfig | null {
     const resolveStatus = image.resolveStatus === 'ok' || image.resolveStatus === 'failed' ? image.resolveStatus : undefined
     const resolveReason =
       typeof image.resolveReason === 'string' && image.resolveReason.trim().length > 0 ? image.resolveReason.trim() : undefined
+    const width = typeof image.width === 'number' && Number.isFinite(image.width) && image.width > 0 ? Math.round(image.width) : undefined
+    const height =
+      typeof image.height === 'number' && Number.isFinite(image.height) && image.height > 0 ? Math.round(image.height) : undefined
+    const qualityHint =
+      image.qualityHint === 'high' || image.qualityHint === 'normal' || image.qualityHint === 'low'
+        ? image.qualityHint
+        : undefined
 
     images.push({
       id: image.id,
@@ -160,6 +204,9 @@ function normalizeConfig(input: BoardConfig): BoardConfig | null {
       originalUrl,
       resolveStatus,
       resolveReason,
+      width,
+      height,
+      qualityHint,
     })
   }
 
@@ -171,14 +218,23 @@ function normalizeConfig(input: BoardConfig): BoardConfig | null {
 }
 
 export function loadBoardConfig(): BoardConfig | null {
-  const raw = localStorage.getItem(BOARD_CONFIG_KEY)
+  if (memoryBoardConfig) {
+    return cloneValue(memoryBoardConfig)
+  }
+
+  const raw = readLocalStorage(BOARD_CONFIG_KEY)
   if (!raw) {
     return null
   }
 
   try {
     const parsed = JSON.parse(raw) as BoardConfig
-    return normalizeConfig(parsed)
+    const normalized = normalizeConfig(parsed)
+    if (!normalized) {
+      return null
+    }
+    memoryBoardConfig = cloneValue(normalized)
+    return normalized
   } catch {
     return null
   }
@@ -189,7 +245,10 @@ export function loadBoardConfigOrDefault(): BoardConfig {
 }
 
 export function saveBoardConfig(config: BoardConfig): void {
-  localStorage.setItem(BOARD_CONFIG_KEY, JSON.stringify(config))
+  const normalized = normalizeConfig(config)
+  const snapshot = normalized ?? cloneValue(config)
+  memoryBoardConfig = cloneValue(snapshot)
+  writeLocalStorage(BOARD_CONFIG_KEY, JSON.stringify(snapshot))
 }
 
 // 从配置生成初始状态：所有图片进入未排序池。
@@ -261,21 +320,35 @@ function toCompatibleState(config: BoardConfig, candidate: StateCandidate): Boar
 }
 
 export function loadBoardState(config: BoardConfig): BoardState {
-  const raw = localStorage.getItem(BOARD_STATE_KEY)
+  if (memoryBoardState) {
+    const memoryCompatible = toCompatibleState(config, memoryBoardState as StateCandidate)
+    if (memoryCompatible) {
+      return memoryCompatible
+    }
+  }
+
+  const raw = readLocalStorage(BOARD_STATE_KEY)
   if (!raw) {
     return createBoardStateFromConfig(config)
   }
 
   try {
     const parsed = JSON.parse(raw) as StateCandidate
-    return toCompatibleState(config, parsed) ?? createBoardStateFromConfig(config)
+    const compatible = toCompatibleState(config, parsed)
+    if (!compatible) {
+      return createBoardStateFromConfig(config)
+    }
+    memoryBoardState = cloneValue(compatible)
+    return compatible
   } catch {
     return createBoardStateFromConfig(config)
   }
 }
 
 export function saveBoardState(state: BoardState): void {
-  localStorage.setItem(BOARD_STATE_KEY, JSON.stringify(state))
+  const snapshot = cloneValue(state)
+  memoryBoardState = snapshot
+  writeLocalStorage(BOARD_STATE_KEY, JSON.stringify(snapshot))
 }
 
 export function resetBoardState(config: BoardConfig): BoardState {
@@ -296,6 +369,9 @@ export interface CreateImageOptions {
   originalUrl?: string
   resolveStatus?: ResolveStatus
   resolveReason?: string
+  width?: number
+  height?: number
+  qualityHint?: QualityHint
 }
 
 export function createImage(src: string, options?: CreateImageOptions): ImageItem {
@@ -312,6 +388,15 @@ export function createImage(src: string, options?: CreateImageOptions): ImageIte
   }
   if (options?.resolveReason) {
     next.resolveReason = options.resolveReason
+  }
+  if (typeof options?.width === 'number' && Number.isFinite(options.width) && options.width > 0) {
+    next.width = Math.round(options.width)
+  }
+  if (typeof options?.height === 'number' && Number.isFinite(options.height) && options.height > 0) {
+    next.height = Math.round(options.height)
+  }
+  if (options?.qualityHint === 'high' || options?.qualityHint === 'normal' || options?.qualityHint === 'low') {
+    next.qualityHint = options.qualityHint
   }
 
   return next
