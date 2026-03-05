@@ -23,6 +23,10 @@ public class ImageResolveController {
         this.imageResolveService = imageResolveService;
     }
 
+    /**
+     * 解析图片地址。
+     * 输入可以是直链或网页地址，服务会尝试返回可访问的图片代理地址。
+     */
     @PostMapping("/resolve")
     public ResolveImageResponse resolve(@RequestBody(required = false) ResolveImageRequest request) {
         if (request == null || request.url() == null) {
@@ -31,6 +35,9 @@ public class ImageResolveController {
         return imageResolveService.resolve(request.url());
     }
 
+    /**
+     * 代理拉取图片二进制，统一规避前端跨域限制。
+     */
     @GetMapping("/proxy")
     public ResponseEntity<byte[]> proxy(@RequestParam("target") String target) {
         ProxyImagePayload payload = imageResolveService.proxyImage(target);
@@ -40,10 +47,12 @@ public class ImageResolveController {
                 .body(payload.body());
     }
 
+    /**
+     * 统一返回代理接口错误码与错误原因。
+     */
     @ExceptionHandler(ImageProxyException.class)
     public ResponseEntity<Map<String, String>> handleProxyError(ImageProxyException exception) {
         return ResponseEntity.status(exception.getStatus())
                 .body(Map.of("error", exception.getMessage()));
     }
 }
-

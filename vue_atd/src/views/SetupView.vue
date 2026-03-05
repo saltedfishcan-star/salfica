@@ -161,6 +161,7 @@ async function resolveRemoteImage(url: string): Promise<ImageItem> {
   }
 }
 
+// 本地文件读取为 dataURL，便于在前端立即预览。
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -176,6 +177,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
   })
 }
 
+// 解析图片原始尺寸，用于提示“解析信息”。
 function getImageDimensions(src: string): Promise<{ width: number; height: number } | null> {
   return new Promise((resolve) => {
     const image = new Image()
@@ -187,6 +189,7 @@ function getImageDimensions(src: string): Promise<{ width: number; height: numbe
   })
 }
 
+// 从拖拽的 HTML 片段中提取 src/href 里的 URL。
 function extractUrlsFromHtml(html: string): string[] {
   if (!html.trim()) {
     return []
@@ -207,6 +210,7 @@ function extractUrlsFromHtml(html: string): string[] {
   return Array.from(new Set(normalized))
 }
 
+// 从任意文本中提取 http/https URL 并去重。
 function extractHttpUrls(text: string): string[] {
   const matches = text.match(/https?:\/\/[^\s"'<>]+/gi) ?? []
   const normalized = matches
@@ -297,6 +301,7 @@ async function addImagesFromFiles(files: File[]): Promise<void> {
   showMessage(messageParts.join(' '))
 }
 
+// 解析文本中的链接并调用后端解析服务。
 async function addImagesFromText(rawText: string): Promise<void> {
   const urls = extractHttpUrls(rawText)
   if (urls.length === 0) {
@@ -838,4 +843,3 @@ function startBoard(): void {
   }
 }
 </style>
-

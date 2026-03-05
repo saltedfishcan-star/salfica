@@ -33,6 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class ImageResolveService {
+    // 网络与缓存策略：限制响应大小，避免慢请求和超大内容拖垮服务。
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(8);
     private static final Duration CACHE_TTL = Duration.ofMinutes(5);
@@ -49,8 +50,12 @@ public class ImageResolveService {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
+    // 解析结果短期缓存，减少重复抓取同一页面。
     private final Map<String, CacheEntry> resolveCache = new ConcurrentHashMap<>();
 
+    /**
+     * 对外解析入口：校验 URL -> 命中缓存 -> 实际解析。
+     */
     public ResolveImageResponse resolve(String rawUrl) {
         URI source = parseAndValidate(rawUrl);
         if (source == null) {
@@ -68,6 +73,9 @@ public class ImageResolveService {
         return resolved;
     }
 
+    /**
+     * 代理下载图片，返回原始图片字节与内容类型。
+     */
     public ProxyImagePayload proxyImage(String target) {
         URI source = parseAndValidate(target);
         if (source == null) {
@@ -99,6 +107,12 @@ public class ImageResolveService {
         return new ProxyImagePayload(fetched.body(), contentType);
     }
 
+    /**
+     * 核心解析流程：
+     * 1) 直链图片直接返回；
+     * 2) 非直链抓取 HTML，提取候选图片；
+     * 3) 返回可用于前端展示的代理 URL。
+     */
     private ResolveImageResponse resolveInternal(URI source) {
         if (looksLikeDirectImage(source.getPath())) {
             return ResolveImageResponse.ok(source.toString(), buildProxyUrl(source));
@@ -140,6 +154,9 @@ public class ImageResolveService {
         return ResolveImageResponse.ok(resolved.toString(), buildProxyUrl(resolved));
     }
 
+    /**
+     * 发起 HTTP 请求并读取受限长度的响应体。
+     */
     private HttpFetchResult fetch(URI source, String acceptHeader, int maxBytes) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(source)
                 .timeout(REQUEST_TIMEOUT)
@@ -162,6 +179,9 @@ public class ImageResolveService {
         );
     }
 
+    /**
+     * 读取输入流并做最大字节数保护。
+     */
     private byte[] readLimited(InputStream input, int maxBytes) throws IOException {
         byte[] chunk = new byte[8192];
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -183,6 +203,9 @@ public class ImageResolveService {
         return output.toByteArray();
     }
 
+    /**
+     * 依据响应 Content-Type 里的 charset 解码 HTML，默认 UTF-8。
+     */
     private String decodeBody(byte[] body, String contentType) {
         Charset charset = StandardCharsets.UTF_8;
         if (contentType != null) {
@@ -198,6 +221,9 @@ public class ImageResolveService {
         return new String(body, charset);
     }
 
+    /**
+     * 从 HTML 中提取图片地址，优先使用 og:image / twitter:image，再回退 img 标签。
+     */
     private Optional<URI> extractImageUrl(String html, URI baseUri) {
         Document document = Jsoup.parse(html, baseUri.toString());
 
@@ -283,6 +309,9 @@ public class ImageResolveService {
         return Optional.of(validated);
     }
 
+    /**
+     * 基于后缀快速判断 URL path 是否像图片直链。
+     */
     private boolean looksLikeDirectImage(String path) {
         if (path == null) {
             return false;
@@ -316,6 +345,11 @@ public class ImageResolveService {
         return "/api/image/proxy?target=" + URLEncoder.encode(resolvedImageUri.toString(), StandardCharsets.UTF_8);
     }
 
+    /**
+     * URL 基础校验与 SSRF 风险过滤：
+     * - 仅允许 http/https
+     * - 禁止内网、回环、链路本地等地址
+     */
     private URI parseAndValidate(String rawUrl) {
         if (rawUrl == null || rawUrl.isBlank()) {
             return null;
@@ -430,6 +464,9 @@ public class ImageResolveService {
         return entry.response();
     }
 
+    /**
+     * 写入解析缓存，TTL 由 CACHE_TTL 控制。
+     */
     private void putCached(String key, ResolveImageResponse response) {
         resolveCache.put(key, new CacheEntry(response, Instant.now().plus(CACHE_TTL)));
     }
@@ -440,4 +477,3 @@ public class ImageResolveService {
     private record CacheEntry(ResolveImageResponse response, Instant expiresAt) {
     }
 }
-

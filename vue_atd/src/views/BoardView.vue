@@ -8,6 +8,7 @@ import { loadBoardConfig, loadBoardState, saveBoardState } from '../lib/board'
 const router = useRouter()
 const DRAG_GROUP = { name: 'ranking', pull: true, put: true }
 
+// 没有配置时回到配置页，避免空页面。
 const config = ref<BoardConfig | null>(loadBoardConfig())
 if (!config.value || config.value.images.length === 0) {
   router.replace('/setup')
@@ -84,6 +85,7 @@ function getDownloadFilename(): string {
   return `rank-table-${date}-${time}.png`
 }
 
+// 导出前等待图片可用，降低 html2canvas 拉伸或空白概率。
 async function waitForImagesReady(container: HTMLElement): Promise<void> {
   const images = Array.from(container.querySelectorAll('img'))
   if (images.length === 0) {
@@ -109,6 +111,7 @@ async function waitForImagesReady(container: HTMLElement): Promise<void> {
   )
 }
 
+// 仅导出 rank-table 区域为 PNG。
 async function downloadRankTable(): Promise<void> {
   if (isDownloading.value) {
     return

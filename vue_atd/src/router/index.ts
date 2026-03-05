@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import SetupView from '../views/SetupView.vue'
 import BoardView from '../views/BoardView.vue'
 
+// 路由设计：默认进入配置页，再跳转到榜单页。
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [

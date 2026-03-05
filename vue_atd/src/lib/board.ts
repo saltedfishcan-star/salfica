@@ -25,6 +25,7 @@ export interface BoardState {
   pool: ImageItem[]
 }
 
+// localStorage 键名统一管理，避免散落魔法字符串。
 export const BOARD_CONFIG_KEY = 'atd_board_config_v1'
 export const BOARD_STATE_KEY = 'atd_board_state_v1'
 export const MIN_TIERS = 2
@@ -70,6 +71,7 @@ export function createDefaultTiers(): TierConfig[] {
   ]
 }
 
+// 为标题和等级生成一套可直接使用的默认配置。
 export function createDefaultConfig(): BoardConfig {
   return {
     title: '图片榜单',
@@ -190,6 +192,7 @@ export function saveBoardConfig(config: BoardConfig): void {
   localStorage.setItem(BOARD_CONFIG_KEY, JSON.stringify(config))
 }
 
+// 从配置生成初始状态：所有图片进入未排序池。
 export function createBoardStateFromConfig(config: BoardConfig): BoardState {
   const rankings: Record<string, ImageItem[]> = {}
   for (const tier of config.tiers) {
