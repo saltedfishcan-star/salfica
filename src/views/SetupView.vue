@@ -893,11 +893,14 @@ function startBoard(): void {
   background: #f3f4f6;
 }
 
-/* 缩略图：固定宽高比并用 cover 保证铺满卡片。 */
+/* 缩略图：不再强制固定比例，按原图比例缩放并保持居中。 */
 .image-card img {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  margin: 0 auto;
   display: block;
 }
 
@@ -930,10 +933,10 @@ function startBoard(): void {
   font-weight: 600;
 }
 
-/* 失败占位：当图片不可加载时显示原因文案。 */
+/* 失败占位：当图片不可加载时显示原因文案，并保持卡片内容居中。 */
 .image-fallback {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
   align-items: center;

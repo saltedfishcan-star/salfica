@@ -7,7 +7,6 @@ import { loadBoardConfig, loadBoardState, saveBoardState } from '../lib/board'
 
 const router = useRouter()
 const DRAG_GROUP = { name: 'ranking', pull: true, put: true }
-const EXPORT_SCALE = 3
 
 // 没有配置时回到配置页，避免空页面。
 const config = ref<BoardConfig | null>(loadBoardConfig())
@@ -25,11 +24,7 @@ const board = ref<BoardState>(
 )
 
 const failedImages = ref<Record<string, boolean>>({})
-const rankTableRef = ref<HTMLElement | null>(null)
-const isDownloading = ref(false)
-const downloadStatus = ref<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null)
 const previewImageSrc = ref<string>('')
-let downloadStatusTimer: ReturnType<typeof setTimeout> | null = null
 
 function markImageFailed(item: ImageItem): void {
   failedImages.value = {
@@ -52,6 +47,10 @@ watch(
 
 function goSetup(): void {
   router.push('/setup')
+}
+
+function goCapture(): void {
+  router.push('/capture')
 }
 
 function isImageFailed(item: ImageItem): boolean {
@@ -79,136 +78,12 @@ function onWindowKeyDown(event: KeyboardEvent): void {
   }
 }
 
-function clearDownloadStatus(): void {
-  if (downloadStatusTimer !== null) {
-    clearTimeout(downloadStatusTimer)
-    downloadStatusTimer = null
-  }
-}
-
-function showDownloadStatus(type: 'success' | 'error' | 'warning', message: string): void {
-  downloadStatus.value = { type, message }
-  clearDownloadStatus()
-  downloadStatusTimer = setTimeout(() => {
-    downloadStatus.value = null
-  }, 3200)
-}
-
-function pad2(value: number): string {
-  return value.toString().padStart(2, '0')
-}
-
-function getDownloadFilename(): string {
-  const now = new Date()
-  const date = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`
-  const time = `${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
-  return `rank-table-${date}-${time}.png`
-}
-
-// 导出前等待图片可用，降低 html2canvas 拉伸或空白概率。
-async function waitForImagesReady(container: HTMLElement): Promise<void> {
-  const images = Array.from(container.querySelectorAll('img'))
-  if (images.length === 0) {
-    return
-  }
-
-  await Promise.all(
-    images.map(async (img) => {
-      if (img.complete) {
-        return
-      }
-      try {
-        await img.decode()
-      } catch {
-        await new Promise<void>((resolve) => {
-          const finish = () => resolve()
-          img.addEventListener('load', finish, { once: true })
-          img.addEventListener('error', finish, { once: true })
-          setTimeout(finish, 1200)
-        })
-      }
-    }),
-  )
-}
-
-async function downloadRankTableWithHtml2Canvas(rankTable: HTMLElement): Promise<void> {
-  const { default: html2canvas } = await import('html2canvas')
-  const canvas = await html2canvas(rankTable, {
-    backgroundColor: '#ffffff',
-    scale: Math.max(window.devicePixelRatio || 1, EXPORT_SCALE),
-    width: rankTable.scrollWidth,
-    height: rankTable.scrollHeight,
-    useCORS: true,
-    allowTaint: false,
-    imageTimeout: 15000,
-    logging: false,
-    onclone: (clonedDocument) => {
-      const clonedImages = clonedDocument.querySelectorAll('.image-block img')
-      clonedImages.forEach((node) => {
-        const image = node as HTMLImageElement
-        const src = image.getAttribute('src')
-        if (!src) {
-          return
-        }
-
-        const replacement = clonedDocument.createElement('div')
-        const safeSrc = src.replace(/["\\]/g, '\\$&')
-        replacement.style.width = '100%'
-        replacement.style.height = '100%'
-        replacement.style.display = 'block'
-        replacement.style.backgroundImage = `url("${safeSrc}")`
-        replacement.style.backgroundSize = 'cover'
-        replacement.style.backgroundPosition = 'center center'
-        replacement.style.backgroundRepeat = 'no-repeat'
-        image.replaceWith(replacement)
-      })
-    },
-  })
-
-  const downloadLink = document.createElement('a')
-  downloadLink.href = canvas.toDataURL('image/png')
-  downloadLink.download = getDownloadFilename()
-  downloadLink.click()
-}
-
-// 仅导出 rank-table 区域为 PNG。
-async function downloadRankTable(): Promise<void> {
-  if (isDownloading.value) {
-    return
-  }
-
-  const rankTable = rankTableRef.value
-  if (!rankTable) {
-    showDownloadStatus('error', 'Rank table not found.')
-    return
-  }
-
-  isDownloading.value = true
-
-  try {
-    await waitForImagesReady(rankTable)
-    await downloadRankTableWithHtml2Canvas(rankTable)
-
-    if (Object.keys(failedImages.value).length > 0) {
-      showDownloadStatus('warning', 'Downloaded. Some images may be missing.')
-    } else {
-      showDownloadStatus('success', 'Downloaded rank-table PNG.')
-    }
-  } catch (error) {
-    console.error('Failed to download rank-table image:', error)
-    showDownloadStatus('error', 'Download failed. External image restrictions may apply.')
-  } finally {
-    isDownloading.value = false
-  }
-}
-
 onMounted(() => {
   window.addEventListener('keydown', onWindowKeyDown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onWindowKeyDown)
-  clearDownloadStatus()
 })
 </script>
 
@@ -218,7 +93,7 @@ onUnmounted(() => {
       <h1>{{ config.title }}</h1>
     </header>
 
-    <div ref="rankTableRef" class="rank-table">
+    <div class="rank-table">
       <div v-for="tier in config.tiers" :key="tier.id" class="rank-row">
         <div class="rank-level" :style="{ backgroundColor: tier.color, color: '#111827' }">
           <span class="rank-level-label">{{ tier.label }}</span>
@@ -295,13 +170,9 @@ onUnmounted(() => {
       </draggable>
     </section>
 
-    <p v-if="downloadStatus" class="download-status" :class="`download-status--${downloadStatus.type}`">
-      {{ downloadStatus.message }}
-    </p>
-
     <div class="floating-actions">
-      <button type="button" class="floating-button floating-download" :disabled="isDownloading" @click="downloadRankTable">
-        {{ isDownloading ? 'Downloading...' : 'Download PNG' }}
+      <button type="button" class="floating-button floating-download" @click="goCapture">
+        截图页
       </button>
       <button type="button" class="floating-button floating-edit" @click="goSetup">编辑配置</button>
     </div>
@@ -417,6 +288,9 @@ onUnmounted(() => {
   width: var(--card-width);
   flex: 0 0 var(--card-width);
   height: var(--card-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--color-border-strong);
   background: var(--color-bg-muted);
   overflow: hidden;
@@ -425,9 +299,11 @@ onUnmounted(() => {
 }
 
 .image-block img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
   display: block;
 }
 
@@ -491,39 +367,6 @@ onUnmounted(() => {
 .floating-edit {
   background: var(--color-text-primary);
   color: var(--color-bg-panel);
-}
-
-.download-status {
-  position: fixed;
-  right: 24px;
-  top: 76px;
-  max-width: min(420px, calc(100vw - 32px));
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.3;
-  border: 1px solid transparent;
-  background: #f3f4f6;
-  color: var(--color-text-primary);
-  z-index: 20;
-}
-
-.download-status--success {
-  border-color: #065f46;
-  background: #ecfdf5;
-  color: #065f46;
-}
-
-.download-status--warning {
-  border-color: #92400e;
-  background: #fffbeb;
-  color: #92400e;
-}
-
-.download-status--error {
-  border-color: #991b1b;
-  background: #fef2f2;
-  color: #991b1b;
 }
 
 .image-preview-mask {
@@ -591,10 +434,5 @@ onUnmounted(() => {
     padding: 0 14px;
   }
 
-  .download-status {
-    right: 14px;
-    top: 60px;
-    max-width: calc(100vw - 28px);
-  }
 }
 </style>

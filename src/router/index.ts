@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import SetupView from '../views/SetupView.vue'
 import BoardView from '../views/BoardView.vue'
+import CaptureView from '../views/CaptureView.vue'
 
 // 路由设计：默认进入配置页，再跳转到榜单页。
 const router = createRouter({
@@ -19,6 +20,11 @@ const router = createRouter({
       path: '/board',
       name: 'board',
       component: BoardView,
+    },
+    {
+      path: '/capture',
+      name: 'capture',
+      component: CaptureView,
     },
     {
       path: '/about',
