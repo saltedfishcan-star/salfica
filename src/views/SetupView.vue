@@ -18,16 +18,6 @@ import {
   saveBoardConfig,
 } from '../lib/board'
 
-interface ResolveApiResponse {
-  status: 'ok' | 'failed'
-  resolvedImageUrl?: string
-  proxyUrl?: string
-  reason?: string
-  selectedWidth?: number
-  selectedHeight?: number
-  qualityHint?: QualityHint
-}
-
 const router = useRouter()
 const config = ref<BoardConfig>(loadBoardConfigOrDefault())
 const imageUrlInput = ref<string>('')
@@ -135,78 +125,52 @@ function isHttpImageUrl(value: string): boolean {
   }
 }
 
-function mapResolveReason(reason?: string): string {
-  switch (reason) {
-    case 'invalid_url':
-      return 'URL 格式无效。'
-    case 'blocked_image_host':
-      return '目标地址被拦截（内网/私有地址）。'
-    case 'no_image_found':
-      return '该页面未找到可用图片。'
-    case 'upstream_fetch_failed':
-      return '抓取源页面失败。'
-    case 'upstream_interrupted':
-      return '解析图片时请求被中断。'
-    case 'response_too_large':
-      return '源页面响应体过大。'
-    case undefined:
-    case '':
-      return '图片解析失败。'
-    default:
-      if (reason.startsWith('upstream_status_')) {
-        return `源站返回 ${reason.replace('upstream_status_', 'HTTP ')}。`
-      }
-      return reason
+const IMAGE_SUFFIXES = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg', '.avif']
+
+function hasImageLikeSuffix(value: string): boolean {
+  if (!isHttpImageUrl(value)) {
+    return false
+  }
+
+  try {
+    const url = new URL(value)
+    const pathname = url.pathname.toLowerCase()
+    return IMAGE_SUFFIXES.some((suffix) => pathname.endsWith(suffix))
+  } catch {
+    return false
   }
 }
 
-async function resolveRemoteImage(url: string): Promise<ImageItem> {
-  try {
-    const response = await fetch('/api/image/resolve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-    })
-
-    if (!response.ok) {
-      const fallbackReason = `解析服务返回 HTTP ${response.status}。`
-      return createImage(url, {
-        originalUrl: url,
-        resolveStatus: 'failed',
-        resolveReason: fallbackReason,
-      })
-    }
-
-    const data = (await response.json()) as ResolveApiResponse
-    if (data.status === 'ok' && data.proxyUrl) {
-      const width = typeof data.selectedWidth === 'number' && data.selectedWidth > 0 ? Math.round(data.selectedWidth) : undefined
-      const height = typeof data.selectedHeight === 'number' && data.selectedHeight > 0 ? Math.round(data.selectedHeight) : undefined
-      const qualityHint =
-        data.qualityHint === 'high' || data.qualityHint === 'normal' || data.qualityHint === 'low'
-          ? data.qualityHint
-          : detectQualityHint(width, height)
-
-      return createImage(data.proxyUrl, {
-        originalUrl: url,
-        resolveStatus: 'ok',
-        width,
-        height,
-        qualityHint,
-      })
-    }
-
+async function resolveDirectImage(url: string): Promise<ImageItem> {
+  if (!isHttpImageUrl(url)) {
     return createImage(url, {
       originalUrl: url,
       resolveStatus: 'failed',
-      resolveReason: mapResolveReason(data.reason),
-    })
-  } catch {
-    return createImage(url, {
-      originalUrl: url,
-      resolveStatus: 'failed',
-      resolveReason: '解析服务暂时不可用。',
+      resolveReason: '链接格式无效，仅支持 http(s) 图片地址。',
     })
   }
+
+  const dimensions = await getImageDimensions(url)
+  if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) {
+    const fallbackReason = hasImageLikeSuffix(url)
+      ? '图片链接不可访问，或被来源站点限制加载。'
+      : '仅支持图片直链 URL，网页链接暂不支持。'
+
+    return createImage(url, {
+      originalUrl: url,
+      resolveStatus: 'failed',
+      resolveReason: fallbackReason,
+    })
+  }
+
+  const qualityHint = detectQualityHint(dimensions.width, dimensions.height)
+  return createImage(url, {
+    originalUrl: url,
+    resolveStatus: 'ok',
+    width: dimensions.width,
+    height: dimensions.height,
+    qualityHint,
+  })
 }
 
 // 本地文件读取为 dataURL，便于在前端立即预览。
@@ -371,11 +335,11 @@ async function addImagesFromFiles(files: File[]): Promise<void> {
   showMessage(joinSummary(messageParts, '未添加新图片。'))
 }
 
-// 解析文本中的链接并调用后端解析服务。
+// 解析文本中的链接并在浏览器内验证图片可访问性。
 async function addImagesFromText(rawText: string): Promise<void> {
   const urls = extractHttpUrls(rawText)
   if (urls.length === 0) {
-    showMessage('请输入或拖拽包含 http(s) 的图片地址/网页链接。')
+    showMessage('请输入或拖拽包含 http(s) 的图片直链。')
     return
   }
 
@@ -396,7 +360,7 @@ async function addImagesFromText(rawText: string): Promise<void> {
         continue
       }
 
-      const image = await resolveRemoteImage(url)
+      const image = await resolveDirectImage(url)
       config.value.images.push(image)
       existingUrls.add(url)
       addedCount += 1
@@ -432,7 +396,7 @@ async function addImagesFromText(rawText: string): Promise<void> {
 
   const messageParts: string[] = []
   appendMessagePart(messageParts, addedCount > 0, `已添加 ${addedCount} 条链接。`)
-  appendMessagePart(messageParts, failedCount > 0, `${failedCount} 张图片解析失败，请检查来源链接。`)
+  appendMessagePart(messageParts, failedCount > 0, `${failedCount} 张图片添加失败，仅支持可访问的图片直链。`)
   appendMessagePart(messageParts, skippedDuplicateCount > 0, `已跳过 ${skippedDuplicateCount} 条重复链接。`)
   appendMessagePart(messageParts, lowQualityCount > 0, `${lowQualityCount} 张图片分辨率偏低，导出可能模糊。`)
   appendMessagePart(messageParts, skippedByCount > 0, `单次最多解析 ${MAX_UPLOAD_COUNT} 条，已忽略 ${skippedByCount} 条。`)
@@ -441,7 +405,7 @@ async function addImagesFromText(rawText: string): Promise<void> {
     messageParts.push(`图片信息：${preview}${parsedDetails.length > 3 ? '，...' : ''}`)
   }
 
-  showMessage(joinSummary(messageParts, '未添加新图片，请检查链接是否重复。'))
+  showMessage(joinSummary(messageParts, '未添加新图片，请检查链接格式或是否重复。'))
 }
 
 async function addImagesFromInput(): Promise<void> {
@@ -498,7 +462,7 @@ async function onSearchDrop(event: DragEvent): Promise<void> {
   const mergedText = urlsFromHtml.length > 0 ? urlsFromHtml.join('\n') : droppedText
 
   if (!mergedText.trim()) {
-    showMessage('未检测到可解析链接，请拖拽网页地址或图片地址。')
+    showMessage('未检测到可用链接，请拖拽图片直链地址。')
     return
   }
 
@@ -655,7 +619,7 @@ function startBoard(): void {
             <input
               v-model="imageUrlInput"
               class="text-input"
-              placeholder="拖拽图片到这里，或输入url链接，按enter解析。"
+              placeholder="拖拽图片到这里，或输入图片直链 URL，按 Enter 添加。"
               @keydown.enter.prevent="addImagesFromInput"
             />
           </div>
@@ -663,7 +627,7 @@ function startBoard(): void {
       </div>
 
       <p class="hint">
-        可点击“选择文件”添加本地图片，或粘贴/拖拽图片地址、网页链接自动解析（单次最多 {{ MAX_UPLOAD_COUNT }} 条/张）。
+        可点击“选择文件”添加本地图片，或粘贴/拖拽图片直链 URL（单次最多 {{ MAX_UPLOAD_COUNT }} 条/张，不支持网页链接解析）。
       </p>
 
       <div v-if="config.images.length > 0" class="image-grid">
