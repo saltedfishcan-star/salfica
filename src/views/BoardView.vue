@@ -285,14 +285,14 @@ onUnmounted(() => {
 }
 
 .image-block {
-  width: var(--card-width);
-  flex: 0 0 var(--card-width);
-  height: var(--card-height);
+  width: fit-content;
+  height: fit-content;
+  flex: 0 0 auto;
+  max-width: var(--card-width);
+  max-height: var(--card-height);
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-muted);
   overflow: hidden;
   cursor: grab;
   user-select: none;
@@ -301,8 +301,8 @@ onUnmounted(() => {
 .image-block img {
   width: auto;
   height: auto;
-  max-width: 100%;
-  max-height: 100%;
+  max-width: var(--card-width);
+  max-height: var(--card-height);
   object-fit: contain;
   display: block;
 }
@@ -312,8 +312,8 @@ onUnmounted(() => {
 }
 
 .image-fallback {
-  width: 100%;
-  height: 100%;
+  width: var(--card-width);
+  height: var(--card-height);
   display: flex;
   flex-direction: column;
   align-items: center;

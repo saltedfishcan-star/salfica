@@ -1007,10 +1007,9 @@ function startBoard(): void {
   gap: 10px;
 }
 
-/* 图片卡片外壳：统一边框、圆角与背景层次。 */
+/* 图片卡片外壳：保留圆角与背景层次，不使用统一边框。 */
 .image-card {
   position: relative;
-  border: 1px solid var(--color-border-muted);
   border-radius: 8px;
   overflow: hidden;
   background: #f3f4f6;

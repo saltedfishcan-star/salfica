@@ -76,6 +76,8 @@ function goBack(): void {
 
 <style scoped>
 .capture-page {
+  --thumb-max-width: 100px;
+  --thumb-max-height: 60px;
   min-height: 100vh;
   width: 100%;
   background: #ffffff;
@@ -102,7 +104,7 @@ function goBack(): void {
 .rank-row {
   display: grid;
   grid-template-columns: 140px 1fr;
-  min-height: 84px;
+  min-height: calc(var(--thumb-max-height) + 24px);
 }
 
 .rank-row + .rank-row {
@@ -135,33 +137,33 @@ function goBack(): void {
   align-content: flex-start;
   align-items: flex-start;
   gap: 0;
-  min-height: 60px;
+  min-height: var(--thumb-max-height);
 }
 
 .image-block {
-  width: 100px;
-  flex: 0 0 100px;
-  height: 60px;
+  width: fit-content;
+  height: fit-content;
+  flex: 0 0 auto;
+  max-width: var(--thumb-max-width);
+  max-height: var(--thumb-max-height);
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-muted);
   overflow: hidden;
 }
 
 .image-block img {
   width: auto;
   height: auto;
-  max-width: 100%;
-  max-height: 100%;
+  max-width: var(--thumb-max-width);
+  max-height: var(--thumb-max-height);
   object-fit: contain;
   display: block;
 }
 
 .image-fallback {
-  width: 100%;
-  height: 100%;
+  width: var(--thumb-max-width);
+  height: var(--thumb-max-height);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -191,6 +193,8 @@ function goBack(): void {
 
 @media (max-width: 768px) {
   .capture-page {
+    --thumb-max-width: 84px;
+    --thumb-max-height: 54px;
     padding: 8px;
   }
 
@@ -208,12 +212,6 @@ function goBack(): void {
 
   .rank-level-label {
     font-size: 16px;
-  }
-
-  .image-block {
-    width: 84px;
-    flex-basis: 84px;
-    height: 54px;
   }
 }
 </style>
