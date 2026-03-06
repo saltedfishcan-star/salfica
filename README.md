@@ -60,6 +60,10 @@ base: '/salfica/'
 
 该配置适用于 GitHub Pages 项目站点（仓库名 `salfica`）。
 
+## 在线访问
+- GitHub Pages 地址：`https://saltedfishcan-star.github.io/salfica/`
+- 若访问根域名 `https://saltedfishcan-star.github.io/` 显示 404，属于正常现象（该仓库是项目站点，不是用户站点）。
+
 ## 文档索引
 - [设计文档](docs/设计文档.md)
 - [学习文档（总览）](docs/学习文档.md)
