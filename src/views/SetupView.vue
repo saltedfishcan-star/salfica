@@ -26,10 +26,13 @@ const isResolvingInput = ref(false)
 const isSearchDropActive = ref(false)
 const message = ref<string>('')
 const failedImages = ref<Record<string, boolean>>({})
+const selectedImageIds = ref<Record<string, boolean>>({})
 const previewImageSrc = ref<string>('')
 
 const tierCount = computed(() => config.value.tiers.length)
 const imageCount = computed(() => config.value.images.length)
+const selectedImageCount = computed(() => Object.keys(selectedImageIds.value).length)
+const allImagesSelected = computed(() => imageCount.value > 0 && selectedImageCount.value === imageCount.value)
 
 watch(
   config,
@@ -37,6 +40,31 @@ watch(
     saveBoardConfig(value)
   },
   { deep: true },
+)
+
+watch(
+  () => config.value.images.map((image) => image.id),
+  (imageIds) => {
+    const validIds = new Set(imageIds)
+    const next: Record<string, boolean> = {}
+    let changed = false
+
+    for (const id of Object.keys(selectedImageIds.value)) {
+      if (validIds.has(id)) {
+        next[id] = true
+      } else {
+        changed = true
+      }
+    }
+
+    if (!changed && Object.keys(next).length !== Object.keys(selectedImageIds.value).length) {
+      changed = true
+    }
+
+    if (changed) {
+      selectedImageIds.value = next
+    }
+  },
 )
 
 function showMessage(next: string): void {
@@ -477,7 +505,59 @@ function removeImage(id: string): void {
     delete next[id]
     failedImages.value = next
   }
+  if (selectedImageIds.value[id]) {
+    const next = { ...selectedImageIds.value }
+    delete next[id]
+    selectedImageIds.value = next
+  }
   clearMessage()
+}
+
+function isImageSelected(id: string): boolean {
+  return !!selectedImageIds.value[id]
+}
+
+function toggleImageSelection(id: string): void {
+  const next = { ...selectedImageIds.value }
+  if (next[id]) {
+    delete next[id]
+  } else {
+    next[id] = true
+  }
+  selectedImageIds.value = next
+  clearMessage()
+}
+
+function selectAllImages(): void {
+  const next: Record<string, boolean> = {}
+  for (const image of config.value.images) {
+    next[image.id] = true
+  }
+  selectedImageIds.value = next
+  clearMessage()
+}
+
+function clearImageSelection(): void {
+  selectedImageIds.value = {}
+  clearMessage()
+}
+
+function removeSelectedImages(): void {
+  const selectedIds = new Set(Object.keys(selectedImageIds.value))
+  if (selectedIds.size === 0) {
+    showMessage('请先选择要删除的图片。')
+    return
+  }
+
+  config.value.images = config.value.images.filter((item) => !selectedIds.has(item.id))
+  const nextFailed = { ...failedImages.value }
+  for (const id of selectedIds) {
+    delete nextFailed[id]
+  }
+  failedImages.value = nextFailed
+  selectedImageIds.value = {}
+
+  showMessage(`已批量删除 ${selectedIds.size} 张图片。`)
 }
 
 function markImageFailed(image: ImageItem): void {
@@ -619,8 +699,24 @@ function startBoard(): void {
           </div>
         </div>
       </div>
+      <div v-if="config.images.length > 0" class="batch-actions">
+        <span>已选 {{ selectedImageCount }} / {{ imageCount }}</span>
+        <div class="batch-action-buttons">
+          <button type="button" class="primary-btn" :disabled="allImagesSelected" @click="selectAllImages">全选</button>
+          <button type="button" class="primary-btn" :disabled="selectedImageCount === 0" @click="clearImageSelection">
+            清空选择
+          </button>
+          <button type="button" class="danger-btn" :disabled="selectedImageCount === 0" @click="removeSelectedImages">
+            批量删除
+          </button>
+        </div>
+      </div>
       <div v-if="config.images.length > 0" class="image-grid">
-        <div v-for="image in config.images" :key="image.id" class="image-card">
+        <div v-for="image in config.images" :key="image.id" class="image-card" :class="{ 'image-card--selected': isImageSelected(image.id) }">
+          <label class="image-select-check" @click.stop>
+            <input type="checkbox" :checked="isImageSelected(image.id)" @change="toggleImageSelection(image.id)" />
+            <span>选择</span>
+          </label>
           <img
             v-if="!isImageFailed(image)"
             :src="image.src"
@@ -877,6 +973,32 @@ function startBoard(): void {
   font-size: 13px;
 }
 
+/* 批量操作区：显示已选统计并提供批量操作按钮。 */
+.batch-actions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.batch-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.batch-action-buttons .primary-btn,
+.batch-action-buttons .danger-btn {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 /* 图片网格：自适应列数展示所有已添加图片。 */
 .image-grid {
   margin-top: 12px;
@@ -887,10 +1009,37 @@ function startBoard(): void {
 
 /* 图片卡片外壳：统一边框、圆角与背景层次。 */
 .image-card {
+  position: relative;
   border: 1px solid var(--color-border-muted);
   border-radius: 8px;
   overflow: hidden;
   background: #f3f4f6;
+}
+
+.image-card--selected {
+  box-shadow: inset 0 0 0 2px #065f46;
+}
+
+.image-select-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #111827;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.image-select-check input {
+  margin: 0;
+  width: 12px;
+  height: 12px;
 }
 
 /* 缩略图：不再强制固定比例，按原图比例缩放并保持居中。 */
@@ -987,14 +1136,14 @@ function startBoard(): void {
   padding: 20px;
 }
 
-/* 预览弹窗：限制最大尺寸并提供深色背景承载图片。 */
+/* 预览弹窗：仅作为定位容器，不再提供背景和边框包裹。 */
 .image-preview-dialog {
   position: relative;
   max-width: min(92vw, 1400px);
   max-height: 90vh;
-  background: #111827;
-  border-radius: 10px;
-  padding: 12px;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
 }
 
 /* 预览关闭按钮：固定在弹窗右上角，便于单手关闭。 */
@@ -1013,7 +1162,7 @@ function startBoard(): void {
 .image-preview-full {
   display: block;
   max-width: min(90vw, 1360px);
-  max-height: calc(90vh - 24px);
+  max-height: 90vh;
   object-fit: contain;
 }
 

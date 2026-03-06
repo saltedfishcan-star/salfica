@@ -384,9 +384,9 @@ onUnmounted(() => {
   position: relative;
   max-width: min(92vw, 1400px);
   max-height: 90vh;
-  background: #111827;
-  border-radius: 10px;
-  padding: 12px;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
 }
 
 .image-preview-close {
@@ -403,7 +403,7 @@ onUnmounted(() => {
 .image-preview-full {
   display: block;
   max-width: min(90vw, 1360px);
-  max-height: calc(90vh - 24px);
+  max-height: 90vh;
   object-fit: contain;
 }
 
