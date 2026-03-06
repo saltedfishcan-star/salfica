@@ -616,20 +616,9 @@ function startBoard(): void {
             <button type="button" class="primary-btn" :disabled="isResolvingInput" @click="triggerFilePicker">
               选择文件
             </button>
-            <input
-              v-model="imageUrlInput"
-              class="text-input"
-              placeholder="拖拽图片到这里，或输入图片直链 URL，按 Enter 添加。"
-              @keydown.enter.prevent="addImagesFromInput"
-            />
           </div>
         </div>
       </div>
-
-      <p class="hint">
-        可点击“选择文件”添加本地图片，或粘贴/拖拽图片直链 URL（单次最多 {{ MAX_UPLOAD_COUNT }} 条/张，不支持网页链接解析）。
-      </p>
-
       <div v-if="config.images.length > 0" class="image-grid">
         <div v-for="image in config.images" :key="image.id" class="image-card">
           <img
@@ -674,6 +663,7 @@ function startBoard(): void {
 </template>
 
 <style scoped>
+/* 页面骨架：控制配置页整体宽度、居中布局和基础文字颜色。 */
 .setup-page {
   max-width: 960px;
   margin: 0 auto;
@@ -681,16 +671,19 @@ function startBoard(): void {
   color: var(--color-text-primary);
 }
 
+/* 页头标题：用于“榜单配置”主标题，控制字号和紧凑外边距。 */
 .setup-header h1 {
   margin: 0;
   font-size: 30px;
 }
 
+/* 页头说明：用于标题下引导文案，强调层级关系与可读性。 */
 .setup-header p {
   margin: 8px 0 0;
   color: #374151;
 }
 
+/* 通用面板：用于标题、等级、图片列表三个区块的卡片外观。 */
 .panel {
   margin-top: 18px;
   border: 1px solid var(--color-border-default);
@@ -699,6 +692,7 @@ function startBoard(): void {
   padding: 16px;
 }
 
+/* 面板头：左右对齐标题和统计信息。 */
 .panel-head {
   display: flex;
   align-items: baseline;
@@ -706,22 +700,26 @@ function startBoard(): void {
   margin-bottom: 12px;
 }
 
+/* 面板标题：统一各区块二级标题字号和紧凑布局。 */
 .panel-head h2 {
   margin: 0;
   font-size: 18px;
 }
 
+/* 面板统计：用于“x / y”“x 张”等弱化信息。 */
 .panel-head span {
   color: var(--color-text-secondary);
   font-size: 13px;
 }
 
+/* 字段标签：用于输入项标题，提升可扫描性。 */
 .field-label {
   display: block;
   margin-bottom: 8px;
   font-weight: 600;
 }
 
+/* 文本输入框：统一高度、圆角和内边距，保证可点击面积。 */
 .text-input {
   width: 100%;
   height: 36px;
@@ -731,6 +729,7 @@ function startBoard(): void {
   font-size: 14px;
 }
 
+/* 等级列表容器：垂直排列每个等级配置项。 */
 .tier-list {
   display: flex;
   flex-direction: column;
@@ -738,6 +737,7 @@ function startBoard(): void {
   margin-bottom: 12px;
 }
 
+/* 单个等级行：拖拽、文案、颜色、删除按钮四列布局。 */
 .tier-item {
   display: grid;
   grid-template-columns: auto minmax(140px, 1fr) auto auto;
@@ -745,6 +745,7 @@ function startBoard(): void {
   align-items: center;
 }
 
+/* 拖拽手柄：提供可拖动提示和基础按钮形态。 */
 .tier-drag-handle {
   border: 1px solid var(--color-border-muted);
   border-radius: 8px;
@@ -756,21 +757,25 @@ function startBoard(): void {
   font-size: 12px;
 }
 
+/* 拖拽幽灵态：降低透明度，提示当前被拖拽元素。 */
 .tier-ghost {
   opacity: 0.45;
 }
 
+/* 拖拽选中态：用描边强调当前命中元素。 */
 .tier-chosen {
   outline: 2px solid var(--color-text-primary);
   outline-offset: 2px;
 }
 
+/* 颜色工具区：组织预设色块与颜色选择器。 */
 .tier-color-tools {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
+/* 预设色块：点击可快速应用等级颜色。 */
 .color-swatch {
   width: 18px;
   height: 18px;
@@ -780,11 +785,13 @@ function startBoard(): void {
   cursor: pointer;
 }
 
+/* 激活色块：显示当前等级正在使用的颜色。 */
 .color-swatch--active {
   outline: 2px solid var(--color-text-primary);
   outline-offset: 1px;
 }
 
+/* 颜色选择器：允许自定义非预设颜色。 */
 .color-picker {
   width: 34px;
   height: 22px;
@@ -795,6 +802,7 @@ function startBoard(): void {
   cursor: pointer;
 }
 
+/* 通用按钮基线：统一主按钮与危险按钮的形态与点击反馈。 */
 .primary-btn,
 .danger-btn {
   border: 1px solid var(--color-text-primary);
@@ -806,57 +814,70 @@ function startBoard(): void {
   font-weight: 600;
 }
 
+/* 主按钮：用于正向操作（新增等级、选择文件、进入榜单）。 */
 .primary-btn {
   background: var(--color-text-primary);
   color: var(--color-bg-panel);
 }
 
+/* 危险按钮：用于删除操作，强调风险语义。 */
 .danger-btn {
   border-color: #991b1b;
   color: #991b1b;
 }
 
+/* 禁用态：降低透明度并禁用鼠标手势，提示不可操作。 */
 .danger-btn:disabled,
 .primary-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
+/* 图片操作区：组织拖拽容器与后续导入元素的纵向间距。 */
 .image-actions {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
+/* 拖拽落区：承载文件拖拽/点击选择入口。 */
 .search-drop-zone {
   border: 1px dashed var(--color-border-muted);
   border-radius: 10px;
   padding: 10px;
   background: var(--color-bg-panel);
-  transition: border-color 120ms ease, background-color 120ms ease;
+  transition: background-color 120ms ease;
 }
 
+/* 拖拽激活态：鼠标拖入时高亮背景提示可放置。 */
 .search-drop-zone--active {
-  border-color: #065f46;
   background: #ecfdf5;
 }
 
+/* 文件按钮行：当前为单列布局，方便按钮全宽展示。 */
 .url-row {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px;
+  grid-template-columns: 1fr;
 }
 
+/* 选择文件按钮：宽度撑满拖拽区内容宽度。 */
+.url-row .primary-btn {
+  width: 100%;
+}
+
+/* 原生文件输入：隐藏默认 input，只保留自定义按钮触发。 */
 .file-picker-hidden {
   display: none;
 }
 
+/* 提示文案：用于导入区域下方的说明文字。 */
 .hint {
   margin: 10px 0 0;
   color: var(--color-text-secondary);
   font-size: 13px;
 }
 
+/* 图片网格：自适应列数展示所有已添加图片。 */
 .image-grid {
   margin-top: 12px;
   display: grid;
@@ -864,6 +885,7 @@ function startBoard(): void {
   gap: 10px;
 }
 
+/* 图片卡片外壳：统一边框、圆角与背景层次。 */
 .image-card {
   border: 1px solid var(--color-border-muted);
   border-radius: 8px;
@@ -871,6 +893,7 @@ function startBoard(): void {
   background: #f3f4f6;
 }
 
+/* 缩略图：固定宽高比并用 cover 保证铺满卡片。 */
 .image-card img {
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -878,10 +901,12 @@ function startBoard(): void {
   display: block;
 }
 
+/* 可预览图片：悬停显示放大手势，提示可点开大图。 */
 .previewable-image {
   cursor: zoom-in;
 }
 
+/* 图片元信息条：显示尺寸和质量提示。 */
 .image-meta {
   display: flex;
   justify-content: space-between;
@@ -894,15 +919,18 @@ function startBoard(): void {
   color: var(--color-text-secondary);
 }
 
+/* 尺寸标签：防止尺寸文本在窄卡片中换行。 */
 .image-dimensions {
   white-space: nowrap;
 }
 
+/* 低清标签：以强调色提示导出可能模糊。 */
 .image-quality-low {
   color: #b91c1c;
   font-weight: 600;
 }
 
+/* 失败占位：当图片不可加载时显示原因文案。 */
 .image-fallback {
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -918,6 +946,7 @@ function startBoard(): void {
   padding: 8px;
 }
 
+/* 删除按钮：位于卡片底部，点击移除当前图片。 */
 .remove-image {
   width: 100%;
   border: 0;
@@ -926,6 +955,7 @@ function startBoard(): void {
   cursor: pointer;
 }
 
+/* 空状态：无图片时显示虚线占位和引导文案。 */
 .empty-state {
   margin-top: 12px;
   border: 1px dashed var(--color-border-muted);
@@ -935,12 +965,14 @@ function startBoard(): void {
   color: var(--color-text-secondary);
 }
 
+/* 反馈消息：显示校验失败、解析失败等操作提示。 */
 .message {
   margin-top: 14px;
   color: #b91c1c;
   font-size: 14px;
 }
 
+/* 预览遮罩：覆盖全屏并压暗背景，聚焦大图内容。 */
 .image-preview-mask {
   position: fixed;
   inset: 0;
@@ -952,6 +984,7 @@ function startBoard(): void {
   padding: 20px;
 }
 
+/* 预览弹窗：限制最大尺寸并提供深色背景承载图片。 */
 .image-preview-dialog {
   position: relative;
   max-width: min(92vw, 1400px);
@@ -961,6 +994,7 @@ function startBoard(): void {
   padding: 12px;
 }
 
+/* 预览关闭按钮：固定在弹窗右上角，便于单手关闭。 */
 .image-preview-close {
   position: absolute;
   top: 8px;
@@ -972,6 +1006,7 @@ function startBoard(): void {
   cursor: pointer;
 }
 
+/* 预览大图：按 contain 自适应显示完整图片。 */
 .image-preview-full {
   display: block;
   max-width: min(90vw, 1360px);
@@ -979,25 +1014,31 @@ function startBoard(): void {
   object-fit: contain;
 }
 
+/* 页脚区域：承载“进入榜单”主操作按钮。 */
 .setup-footer {
   margin: 18px 0 8px;
 }
 
+/* 进入榜单按钮：较通用按钮更高，强化主操作。 */
 .start-btn {
   height: 40px;
   padding: 0 18px;
 }
 
+/* 移动端适配：缩小页面内边距并改为单列等级编辑布局。 */
 @media (max-width: 768px) {
+  /* 移动端页面边距：提升小屏可视空间。 */
   .setup-page {
     padding: 14px;
   }
 
+  /* 移动端等级行：改为单列，避免横向拥挤。 */
   .tier-item {
     grid-template-columns: 1fr;
     align-items: stretch;
   }
 
+  /* 移动端颜色工具：允许换行避免溢出。 */
   .tier-color-tools {
     flex-wrap: wrap;
   }
